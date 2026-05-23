@@ -1,0 +1,31 @@
+{
+  "name": "cursor-openai-api",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible HTTP proxy for Cursor SDK models",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "prestart:node": "npm run build",
+    "start:node": "node dist/index.js",
+    "dev:node": "tsx watch src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.13",
+    "@hono/node-server": "^2.0.3",
+    "@hono/zod-validator": "^0.8.0",
+    "hono": "^4.12.21",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3"
+  }
+}
