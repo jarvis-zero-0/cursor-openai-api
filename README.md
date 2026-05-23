@@ -2,6 +2,8 @@
 
 OpenAI-compatible HTTP proxy for [Cursor SDK](https://cursor.com/docs/sdk/typescript) local agents. Point OpenAI clients at this server to use Cursor models (for example `composer-2` or `composer-2.5`) with your Cursor plan usage via `CURSOR_API_KEY`.
 
+<img width="1600" height="924" alt="Screenshot_20260523_032144" src="https://github.com/user-attachments/assets/19988b4e-e58e-45cb-a1a9-d41fc6915a1f" />
+
 ## Requirements
 
 - [Bun](https://bun.sh) (recommended) for the default install, dev, and test scripts
