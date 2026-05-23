@@ -46,40 +46,40 @@ describe("findThinkingEffortParamId", () => {
 
 describe("mergeModelParams", () => {
   test("merges explicit params over reasoning_effort", () => {
-    const params = mergeModelParams(
-      [{ id: "thinking_effort", value: "high" }],
-      "low",
-      "thinking_effort",
-    );
+    const params = mergeModelParams({
+      explicit: [{ id: "thinking_effort", value: "high" }],
+      reasoningEffort: "low",
+      effortParamId: "thinking_effort",
+    });
     expect(params).toEqual([{ id: "thinking_effort", value: "high" }]);
   });
 
   test("adds reasoning_effort when not in explicit params", () => {
-    const params = mergeModelParams(undefined, "medium", "thinking_effort");
+    const params = mergeModelParams({
+      reasoningEffort: "medium",
+      effortParamId: "thinking_effort",
+    });
     expect(params).toEqual([{ id: "thinking_effort", value: "medium" }]);
   });
 
   test("returns undefined when empty", () => {
-    expect(mergeModelParams(undefined, undefined, undefined)).toBeUndefined();
+    expect(mergeModelParams({})).toBeUndefined();
   });
 
   test("applies auto thinking effort before explicit overrides", () => {
-    const params = mergeModelParams(
-      [{ id: "thinking_effort", value: "high" }],
-      undefined,
-      "thinking_effort",
-      "low",
-    );
+    const params = mergeModelParams({
+      explicit: [{ id: "thinking_effort", value: "high" }],
+      effortParamId: "thinking_effort",
+      autoThinkingEffort: "low",
+    });
     expect(params).toEqual([{ id: "thinking_effort", value: "high" }]);
   });
 
   test("uses auto thinking effort when nothing else set", () => {
-    const params = mergeModelParams(
-      undefined,
-      undefined,
-      "thinking_effort",
-      "medium",
-    );
+    const params = mergeModelParams({
+      effortParamId: "thinking_effort",
+      autoThinkingEffort: "medium",
+    });
     expect(params).toEqual([{ id: "thinking_effort", value: "medium" }]);
   });
 });

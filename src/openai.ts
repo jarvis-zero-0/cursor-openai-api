@@ -199,19 +199,26 @@ export interface CursorModelVariant {
   isDefault?: boolean;
 }
 
+export type OpenAIModel = {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: string;
+  display_name?: string;
+  description?: string;
+  cursor_aliases?: string[];
+  cursor_parameters?: CursorModelParameterDefinition[];
+  cursor_variants?: CursorModelVariant[];
+  /** Base Cursor catalog id when this row is a proxy `*-slow` / `*-fast` alias. */
+  cursor_base_model?: string;
+  cursor_speed_alias?: "slow" | "fast";
+  /** Params applied by the alias unless overridden via `cursor_model_params`. */
+  cursor_model_params?: Array<{ id: string; value: string }>;
+};
+
 export interface ModelsListResponse {
   object: "list";
-  data: Array<{
-    id: string;
-    object: "model";
-    created: number;
-    owned_by: string;
-    display_name?: string;
-    description?: string;
-    cursor_aliases?: string[];
-    cursor_parameters?: CursorModelParameterDefinition[];
-    cursor_variants?: CursorModelVariant[];
-  }>;
+  data: OpenAIModel[];
 }
 
 export function makeCompletionId(): string {

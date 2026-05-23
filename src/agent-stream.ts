@@ -1,4 +1,4 @@
-import type { InteractionUpdate, Run } from "@cursor/sdk";
+import type { InteractionUpdate, ModelSelection, Run } from "@cursor/sdk";
 import { applyInteractionUpdate } from "./interaction-delta.js";
 import type { ChatCompletionChunk } from "./openai.js";
 import type { StreamState } from "./stream.js";
@@ -23,9 +23,11 @@ export function captureTurnUsage(
 export function buildSendOptions(
   state: StreamState,
   stream: TurnStreamContext,
+  sdkModel: ModelSelection,
   writeChunk?: (chunk: ChatCompletionChunk) => Promise<void>,
 ) {
   return {
+    model: sdkModel,
     onDelta: async ({ update }: { update: InteractionUpdate }) => {
       await applyInteractionUpdate(state, update, stream, writeChunk);
       captureTurnUsage(state, update);

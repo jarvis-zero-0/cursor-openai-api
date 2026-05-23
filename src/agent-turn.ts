@@ -1,11 +1,8 @@
-import { Agent, type Run } from "@cursor/sdk";
+import { Agent, type ModelSelection, type Run } from "@cursor/sdk";
 import { buildSendOptions, pumpSdkMessageStream } from "./agent-stream.js";
 import { CursorMetaAccumulator } from "./cursor-meta.js";
 import { ProxyError, mapCursorError } from "./errors.js";
-import {
-  resolveModelSelection,
-  type ModelSelection,
-} from "./model.js";
+import { resolveModel, type ResolvedModel } from "./model.js";
 import { resolveTurnStreamContext, type TurnStreamContext } from "./turn-stream.js";
 import {
   buildSendPayload,
@@ -44,17 +41,16 @@ export interface AgentTurnOutcome {
   state: StreamState;
   meta: CursorMetaAccumulator;
   prepared: PreparedChatSession;
-  modelId: string;
   finalText?: string;
 }
 
 function createAgentOptions(
   config: ProxyContext["config"],
-  modelSelection: ModelSelection,
+  sdkModel: ModelSelection,
 ) {
   return {
     apiKey: config.CURSOR_API_KEY,
-    model: modelSelection,
+    model: sdkModel,
     local: { cwd: config.CURSOR_CWD, settingSources: [] },
   };
 }
@@ -63,14 +59,14 @@ async function runTurnBody(
   ctx: AgentTurnContext,
   options: AgentTurnOptions,
   prepared: PreparedChatSession,
-  modelSelection: ModelSelection,
+  resolved: ResolvedModel,
   turnStream: TurnStreamContext,
 ): Promise<AgentTurnOutcome> {
   const { request, proxy, abortSignal } = ctx;
   const { config, sessions } = proxy;
   const extras = promptExtrasFromRequest(request);
 
-  const state = createStreamState(modelSelection.id, {
+  const state = createStreamState(resolved.clientModel, {
     maxTokens: request.max_tokens,
     agentId: prepared.agentId,
   });
@@ -92,9 +88,11 @@ async function runTurnBody(
   const onChunk = (chunk: ChatCompletionChunk) => sink.writeDelta(chunk);
 
   try {
+    // Per-send `model` is authoritative for tier/params; create-time model on reused
+    // agents may differ when switching `*-slow` / `*-fast` mid-session.
     run = await prepared.agent.send(
       payload,
-      buildSendOptions(state, turnStream, onChunk),
+      buildSendOptions(state, turnStream, resolved.sdk, onChunk),
     );
     unbindAbort = bindRunAbort(run, abortSignal);
     cursorMeta.setRunId(run.id);
@@ -126,7 +124,7 @@ async function runTurnBody(
     const committedKey = sessions.commitChatSession(
       prepared,
       request,
-      modelSelection.id,
+      resolved.sdk.id,
       config,
     );
     if (committedKey) {
@@ -140,7 +138,6 @@ async function runTurnBody(
       state,
       meta: cursorMeta,
       prepared,
-      modelId: modelSelection.id,
       finalText: result.result,
     };
   } catch (err) {
@@ -161,23 +158,23 @@ export async function executeAgentTurn(
   const { request, proxy, headers } = ctx;
   const { config, sessions } = proxy;
   const turnStream = resolveTurnStreamContext(request, config);
-  const modelSelection = await resolveModelSelection(
+  const resolved = await resolveModel(
     request,
     config,
     turnStream.policy.includeThinking,
   );
-  const agentOptions = createAgentOptions(config, modelSelection);
+  const agentOptions = createAgentOptions(config, resolved.sdk);
 
   const prepared = await sessions.prepareChatSession(
     () => Agent.create(agentOptions),
     request,
-    modelSelection,
+    resolved.sdk.id,
     config,
     headers,
     agentOptions,
   );
 
   return sessions.withAgentTurn(prepared.agentId, () =>
-    runTurnBody(ctx, options, prepared, modelSelection, turnStream),
+    runTurnBody(ctx, options, prepared, resolved, turnStream),
   );
 }

@@ -9,7 +9,6 @@ import { normalizeToolArguments } from "./tool-args.js";
 
 export function buildCompletionResponse(
   state: StreamState,
-  model: string,
   meta: CursorCompletionMeta,
   finalText?: string,
 ): ChatCompletionResponse {
@@ -43,7 +42,7 @@ export function buildCompletionResponse(
       id: state.completionId,
       object: "chat.completion",
       created: state.created,
-      model,
+      model: state.model,
       choices: [choice],
       ...(state.usage ? { usage: state.usage } : {}),
     },

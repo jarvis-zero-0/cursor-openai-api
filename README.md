@@ -4,6 +4,20 @@ OpenAI-compatible HTTP proxy for [Cursor SDK](https://cursor.com/docs/sdk/typesc
 
 <img width="1600" height="924" alt="Screenshot_20260523_032144" src="https://github.com/user-attachments/assets/19988b4e-e58e-45cb-a1a9-d41fc6915a1f" />
 
+## Composer fast mode (important)
+
+On Cursor’s catalog, **Composer 2 / 2.5 default to fast mode** (`fast=true`) — higher throughput, different pricing than the standard tier. That is the SDK/product default when you pass `model: "composer-2.5"` with no extra params.
+
+To use the **standard (non-fast) tier** via the SDK or this proxy:
+
+```json
+"cursor_model_params": [{ "id": "fast", "value": "false" }]
+```
+
+Or use the proxy aliases (see below): `"model": "composer-2.5-slow"`.
+
+Other families (GPT, Opus, Codex, etc.) expose the same `fast` parameter when supported; their **defaults vary** (for example Opus and GPT-5.5 often default to `fast=false`). Call `GET /v1/models` or `Cursor.models.list()` to see `cursor_parameters` and preset `cursor_variants` for your account.
+
 ## Requirements
 
 - [Bun](https://bun.sh) (recommended) for the default install, dev, and test scripts
@@ -95,15 +109,36 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-List models (includes `display_name`, `description`, `cursor_aliases`, `cursor_parameters`, and `cursor_variants` when available):
+List models (includes `display_name`, `description`, `cursor_aliases`, `cursor_parameters`, `cursor_variants`, and proxy speed aliases when available):
 
 ```bash
 curl http://localhost:8080/v1/models
 ```
 
+### Speed aliases (`*-slow` / `*-fast`)
+
+For every catalog model that advertises both `fast=false` and `fast=true`, this proxy also lists and accepts:
+
+| Request model | Effect |
+|---------------|--------|
+| `<base>-slow` | Sets `fast=false` on `<base>` (standard tier for Composer) |
+| `<base>-fast` | Sets `fast=true` on `<base>` |
+
+Examples: `composer-2.5-slow`, `claude-opus-4-7-fast`, `gpt-5.5-slow`.
+
+Explicit `cursor_model_params` with `id: "fast"` must agree with the alias; conflicting values are rejected. Aliases are not sent to Cursor as model ids — the proxy resolves to the base id plus params. Each request passes the resolved model (id + params) on `agent.send()`, so you can switch between `*-slow` and `*-fast` on a reused session without creating a new agent.
+
 Model parameters and thinking effort:
 
 ```bash
+# Standard (non-fast) Composer tier — alias or explicit param
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "composer-2.5-slow",
+    "messages": [{"role": "user", "content": "Summarize this repo."}]
+  }'
+
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -276,7 +311,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 - **Runtime**: Local Cursor SDK agents only (`local: { cwd }`). Cloud agents are not exposed in this version.
 - **Messages**: OpenAI `messages[]` (chat) or `input` / `instructions` (responses) are serialized into one Cursor prompt per request; there is no server-side OpenAI thread store.
 - **Responses API**: `POST /v1/responses` accepts string or message-array `input`, maps to the same Cursor agent path as chat completions, and returns typed output items (`message`, `reasoning`, `function_call`). Streaming emits Responses lifecycle events.
-- **Sessions**: When `CURSOR_ENABLE_SESSIONS` is on (default), reuse a Cursor SDK agent by sending the same session id on each request (`X-Session-ID` header or `metadata.session_id` / `metadata.sessionId`), or rely on **auto-session** (`CURSOR_AUTO_SESSION`, default on): if a new request’s `messages[]` extends a cached conversation prefix (same model), the proxy reuses the agent without an explicit session header. The OpenAI `user` field is passed through for client abuse-tracking only and is **not** used as a session key. Resume a known agent with `metadata.cursor_agent_id` (maps to `Agent.resume()`). Follow-ups only forward new messages to `agent.send()`; the agent keeps native multi-turn context.
+- **Sessions**: When `CURSOR_ENABLE_SESSIONS` is on (default), reuse a Cursor SDK agent by sending the same session id on each request (`X-Session-ID` header or `metadata.session_id` / `metadata.sessionId`), or rely on **auto-session** (`CURSOR_AUTO_SESSION`, default on): if a new request’s `messages[]` extends a cached conversation prefix (same base catalog model id), the proxy reuses the agent without an explicit session header. Session matching uses the SDK catalog id (e.g. `composer-2.5`), not `*-slow` / `*-fast` aliases. Each turn still passes the request’s resolved `model` (including `fast` and other `cursor_model_params`) on `agent.send()`, so speed aliases can change mid-conversation on the same agent. The OpenAI `user` field is passed through for client abuse-tracking only and is **not** used as a session key. Resume a known agent with `metadata.cursor_agent_id` (maps to `Agent.resume()`). Follow-ups only forward new messages to `agent.send()`; the agent keeps native multi-turn context.
 - **Multi-turn history**: Prior assistant `reasoning_content` / `reasoning` in chat `messages[]` is preserved when serializing to the Cursor prompt. Chat-only request fields such as `response_format` and unknown passthrough JSON fields are included in the prompt.
 - **Finish reasons**: Emits `length` when `max_tokens` is set and reported completion tokens reach that cap; emits `tool_calls` only when Cursor tool calls are surfaced in the OpenAI response.
 - **Stream errors**: Errors are sent as standard OpenAI-style JSON in SSE `data:` lines (no separate `event: error`), matching `@ai-sdk/openai-compatible` parsers.
@@ -286,6 +321,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 - **Assistant text modes**: `CURSOR_ASSISTANT_TEXT_MODE` / `cursor_assistant_text_mode` control `live`, `final-content`, and `preamble-as-reasoning` routing. Applies to SDK text deltas and client tool loop visible text. See [Assistant text modes](#assistant-text-modes) and [OpenCode](#opencode).
 - **Client abort**: Dropping the HTTP request aborts the in-flight run via `run.cancel()` when supported.
 - **Model parameters**: Pass Cursor SDK params via `cursor_model_params` (`[{ "id", "value" }]`). Chat completions also accept the convenience alias `reasoning_effort`; Responses requests use `reasoning.effort`. These aliases map only when the model catalog defines a thinking-effort param. Explicit `cursor_model_params` win on duplicate ids.
+- **Fast mode**: Composer defaults to `fast=true` in Cursor’s catalog; disable with `cursor_model_params: [{ "id": "fast", "value": "false" }]` or model id `composer-2.5-slow`. Use `*-fast` / `*-slow` proxy aliases for any model that advertises both `fast` param values (see [Speed aliases](#speed-aliases--slow--fast)).
 - **Thinking**: When enabled (default), thinking text is exposed as `reasoning_content` (and `reasoning`) on stream deltas and on the final assistant message. Models with a thinking-effort parameter get a default effort automatically so Cursor actually emits thinking. Set `cursor_include_thinking: false` per request or `CURSOR_INCLUDE_THINKING=false` globally to disable.
 
 ### Tool calls

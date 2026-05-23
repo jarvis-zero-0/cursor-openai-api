@@ -1,13 +1,42 @@
-import { Cursor, type ModelListItem, type ModelParameterValue } from "@cursor/sdk";
+import type {
+  ModelListItem,
+  ModelParameterValue,
+  ModelSelection,
+} from "@cursor/sdk";
 import type { AppConfig } from "./config.js";
 import type { ChatCompletionRequest } from "./openai.js";
 import { ProxyError } from "./errors.js";
+import {
+  FAST_MODEL_PARAM_ID,
+  type FastParamValue,
+  requestedIdHasSpeedSuffix,
+  resolveRequestedModelId,
+  resolveSpeedAliasParams,
+} from "./model-aliases.js";
 import { listCachedModels } from "./model-catalog-cache.js";
 import { resolveIncludeThinking } from "./turn-policy.js";
 
-export type ModelSelection = {
-  id: string;
-  params?: ModelParameterValue[];
+/** Proxy resolution of a request model id → SDK selection + client echo id. */
+export type ResolvedModel = {
+  /** Model id echoed on OpenAI responses (preserves `*-slow` / `*-fast` aliases). */
+  clientModel: string;
+  /** Cursor SDK model for `Agent.create` / `agent.send`. */
+  sdk: ModelSelection;
+};
+
+function buildSdkModelSelection(
+  id: string,
+  params?: ModelParameterValue[],
+): ModelSelection {
+  return params ? { id, params } : { id };
+}
+
+export type MergeModelParamsInput = {
+  explicit?: ModelParameterValue[];
+  reasoningEffort?: string;
+  effortParamId?: string;
+  autoThinkingEffort?: string;
+  aliasFastValue?: FastParamValue;
 };
 
 function paramIdLooksLikeThinkingEffort(
@@ -50,17 +79,26 @@ export function defaultThinkingEffortValue(
 }
 
 export function mergeModelParams(
-  explicit: ModelParameterValue[] | undefined,
-  reasoningEffort: string | undefined,
-  effortParamId: string | undefined,
-  autoThinkingEffort?: string,
+  input: MergeModelParamsInput,
 ): ModelParameterValue[] | undefined {
+  const {
+    explicit,
+    reasoningEffort,
+    effortParamId,
+    autoThinkingEffort,
+    aliasFastValue,
+  } = input;
+  // Precedence (low → high): autoThinking → reasoningEffort → aliasFast → explicit.
+  // resolveModel rejects explicit fast values that conflict with a speed alias.
   const byId = new Map<string, string>();
   if (effortParamId && autoThinkingEffort !== undefined) {
     byId.set(effortParamId, autoThinkingEffort);
   }
   if (effortParamId && reasoningEffort !== undefined) {
     byId.set(effortParamId, reasoningEffort);
+  }
+  if (aliasFastValue !== undefined) {
+    byId.set(FAST_MODEL_PARAM_ID, aliasFastValue);
   }
   for (const param of explicit ?? []) {
     byId.set(param.id, param.value);
@@ -69,12 +107,26 @@ export function mergeModelParams(
   return [...byId.entries()].map(([id, value]) => ({ id, value }));
 }
 
-export async function resolveModelSelection(
+export function requiresModelCatalog(
+  requestedId: string,
+  options: {
+    reasoningEffort?: ChatCompletionRequest["reasoning_effort"];
+    includeThinking: boolean;
+  },
+): boolean {
+  return (
+    options.reasoningEffort !== undefined ||
+    options.includeThinking ||
+    requestedIdHasSpeedSuffix(requestedId)
+  );
+}
+
+export async function resolveModel(
   request: ChatCompletionRequest,
   config: AppConfig,
   includeThinking = resolveIncludeThinking(request, config),
-): Promise<ModelSelection> {
-  const id = request.model ?? config.DEFAULT_MODEL;
+): Promise<ResolvedModel> {
+  const requestedId = request.model ?? config.DEFAULT_MODEL;
   const explicit = request.cursor_model_params;
 
   if (explicit?.some((p) => !p.id?.trim())) {
@@ -86,20 +138,44 @@ export async function resolveModelSelection(
     );
   }
 
-  const needsCatalog =
-    request.reasoning_effort !== undefined || includeThinking;
+  const needsCatalog = requiresModelCatalog(requestedId, {
+    reasoningEffort: request.reasoning_effort,
+    includeThinking,
+  });
 
-  let catalogModel: ModelListItem | undefined;
-  if (needsCatalog) {
-    const models = await listCachedModels(config.CURSOR_API_KEY);
-    catalogModel = models.find((m) => m.id === id);
+  const catalog = needsCatalog
+    ? await listCachedModels(config.CURSOR_API_KEY)
+    : undefined;
+  const catalogIds = catalog ? new Set(catalog.map((m) => m.id)) : undefined;
+  const { baseId, speedAlias } = resolveRequestedModelId(requestedId, catalogIds);
+  const catalogModel = catalog?.find((m) => m.id === baseId);
+
+  const aliasFastValue = resolveSpeedAliasParams({
+    requestedId,
+    baseId,
+    speedAlias,
+    catalogModel,
+    validateAgainstCatalog: needsCatalog,
+  });
+  const explicitFastValue = explicit?.find((p) => p.id === FAST_MODEL_PARAM_ID)?.value;
+  if (
+    aliasFastValue !== undefined &&
+    explicitFastValue !== undefined &&
+    explicitFastValue !== aliasFastValue
+  ) {
+    throw new ProxyError(
+      `Model "${requestedId}" conflicts with cursor_model_params fast=${explicitFastValue}`,
+      400,
+      "invalid_request_error",
+      "conflicting_speed_alias",
+    );
   }
 
   const effortParamId = findThinkingEffortParamId(catalogModel);
 
   if (request.reasoning_effort !== undefined && !effortParamId) {
     throw new ProxyError(
-      `Model "${id}" does not support reasoning_effort`,
+      `Model "${requestedId}" does not support reasoning_effort`,
       400,
       "invalid_request_error",
       "unsupported_reasoning_effort",
@@ -112,8 +188,7 @@ export async function resolveModelSelection(
       : undefined;
 
   const explicitHasEffort =
-    effortParamId != null &&
-    explicit?.some((p) => p.id === effortParamId);
+    effortParamId != null && explicit?.some((p) => p.id === effortParamId);
 
   const autoThinkingEffort =
     includeThinking &&
@@ -124,12 +199,16 @@ export async function resolveModelSelection(
       ? defaultThinkingEffortValue(catalogModel, effortParamId)
       : undefined;
 
-  const params = mergeModelParams(
+  const params = mergeModelParams({
     explicit,
     reasoningEffort,
     effortParamId,
     autoThinkingEffort,
-  );
+    aliasFastValue,
+  });
 
-  return params ? { id, params } : { id };
+  return {
+    clientModel: requestedId,
+    sdk: buildSdkModelSelection(baseId, params),
+  };
 }

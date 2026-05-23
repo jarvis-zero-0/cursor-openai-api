@@ -1,7 +1,6 @@
 import { Agent, type SDKAgent } from "@cursor/sdk";
 import type { AppConfig } from "./config.js";
 import type { ChatCompletionRequest, ChatMessage } from "./openai.js";
-import type { ModelSelection } from "./model.js";
 import {
   deltaMessagesFromSession,
   messagesPrefixMatches,
@@ -46,7 +45,7 @@ export class SessionStore {
   async prepareChatSession(
     createAgent: () => Promise<SDKAgent>,
     request: ChatCompletionRequest,
-    modelSelection: ModelSelection,
+    sdkModelId: string,
     config: AppConfig,
     headers?: SessionRequestHeaders,
     createAgentOptions?: Parameters<typeof Agent.create>[0],
@@ -65,15 +64,14 @@ export class SessionStore {
     this.pruneCache(config);
 
     const sessionKey = resolveSessionKey(request, headers);
-    const modelId = modelSelection.id;
 
     if (sessionKey) {
-      const keyed = this.tryKeyedSession(sessionKey, request, modelId);
+      const keyed = this.tryKeyedSession(sessionKey, request, sdkModelId);
       if (keyed) return keyed;
     }
 
     if (config.CURSOR_AUTO_SESSION !== false) {
-      const matched = this.tryAutoMatchedSession(modelId, request.messages);
+      const matched = this.tryAutoMatchedSession(sdkModelId, request.messages);
       if (matched) return matched;
     }
 

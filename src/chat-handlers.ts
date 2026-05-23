@@ -26,7 +26,6 @@ export async function runChatCompletion(
   });
   const body = buildCompletionResponse(
     outcome.state,
-    outcome.modelId,
     outcome.meta.snapshot(),
     outcome.finalText,
   );
@@ -39,13 +38,13 @@ export async function streamChatCompletion(
   write: ChatChunkWriter,
   headers?: SessionRequestHeaders,
   abortSignal?: AbortSignal,
-): Promise<{ headers: Record<string, string>; modelId: string }> {
+): Promise<{ headers: Record<string, string>; model: string }> {
   const outcome = await executeAgentTurn(
     { proxy, request, headers, abortSignal },
     { stream: { write } },
   );
   return {
     headers: outcome.meta.headers(),
-    modelId: outcome.modelId,
+    model: outcome.state.model,
   };
 }

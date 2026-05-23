@@ -45,7 +45,7 @@ describe("keyed session retry", () => {
     const prepared = await store.prepareChatSession(
       async () => ({ agentId: "new" }) as SDKAgent,
       request,
-      { id: "composer-2" },
+      "composer-2",
       config,
       { "x-session-id": "sess-retry" },
     );

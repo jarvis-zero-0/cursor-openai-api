@@ -24,3 +24,10 @@ export async function listCachedModels(apiKey: string): Promise<ModelListItem[]>
 export function clearModelCatalogCacheForTests(): void {
   catalogByApiKey.clear();
 }
+
+export function seedModelCatalogForTests(
+  apiKey: string,
+  models: ModelListItem[],
+): void {
+  catalogByApiKey.set(apiKey, { models, fetchedAt: Date.now() });
+}
