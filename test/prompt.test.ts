@@ -69,6 +69,63 @@ describe("serializeMessagesToPrompt", () => {
     );
     expect(prompt).toContain("CLIENT TOOL INVENTORY");
     expect(prompt).toContain("tool_calls_begin");
+    expect(prompt).toContain("TOOL ROUTING (authoritative");
+    expect(prompt).toContain("cursor_tool_mode=client");
     expect(prompt).not.toContain("## CLIENT_TOOLS");
+  });
+
+  test("uses native directive when tool mode is native", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Refactor auth.ts" }],
+      undefined,
+      undefined,
+      "native",
+    );
+    expect(prompt).toContain("standalone Cursor SDK agent");
+    expect(prompt).toContain("Do NOT use the Hermes/client marker protocol");
+  });
+
+  test("client mode forbids Cursor citation code fences", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Explain the cwd plumbing" }],
+      { tools: [{ type: "function", function: { name: "foo" } }] },
+      [{ name: "foo" }],
+    );
+    expect(prompt).toContain("OUTPUT FORMATTING");
+    expect(prompt).toContain("line-numbered citation code fences");
+    expect(prompt).toContain("startLine:endLine:filepath");
+  });
+
+  test("client mode explains how to signal completion / return control", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Do the thing" }],
+      { tools: [{ type: "function", function: { name: "foo" } }] },
+      [{ name: "foo" }],
+    );
+    expect(prompt).toContain("COMPLETION / RETURNING CONTROL");
+    expect(prompt).toContain("absence of a tool call");
+    expect(prompt).toContain("main agent thread");
+  });
+
+  test("client mode explains calling other models / subagents", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Do the thing" }],
+      { tools: [{ type: "function", function: { name: "delegate_task" } }] },
+      [{ name: "delegate_task" }],
+    );
+    expect(prompt).toContain("CALLING OTHER MODELS / SUBAGENTS");
+    expect(prompt).toContain("delegate_task");
+  });
+
+  test("native mode explains how to signal completion / return control", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Refactor auth.ts" }],
+      undefined,
+      undefined,
+      "native",
+    );
+    expect(prompt).toContain("COMPLETION / RETURNING CONTROL");
+    expect(prompt).toContain("control returns to the orchestrator");
+    expect(prompt).toContain("no done/stop token");
   });
 });

@@ -177,7 +177,48 @@ describe("chunksFromInteractionUpdate", () => {
       .filter(Boolean);
 
     expect(reasoning).toEqual(["think A", "think B"]);
-    expect(contents).toEqual(["early text", "final text"]);
+    // "early text" and "final text" are separated by a thinking boundary, so a
+    // newline is injected to prevent the two runs from fusing together.
+    expect(contents).toEqual(["early text", "\nfinal text"]);
+  });
+
+  test("live mode does not fuse text runs split by an interleaved boundary", () => {
+    const state = createStreamState("composer-2");
+    const stream = streamContext(livePolicy);
+    const contents: string[] = [];
+
+    for (const update of [
+      { type: "text-delta", text: "...is feasible." },
+      { type: "thinking-delta", text: "internal plan" },
+      { type: "text-delta", text: "Let me check the session keys." },
+    ] as const) {
+      for (const chunk of chunksFromInteractionUpdate(update, state, stream)) {
+        const content = chunk?.choices[0]?.delta.content;
+        if (content) contents.push(content);
+      }
+    }
+
+    expect(contents).toEqual(["...is feasible.", "\nLet me check the session keys."]);
+    expect(state.text).toBe("...is feasible.\nLet me check the session keys.");
+  });
+
+  test("live mode keeps existing separator when text already ends in whitespace", () => {
+    const state = createStreamState("composer-2");
+    const stream = streamContext(livePolicy);
+    const contents: string[] = [];
+
+    for (const update of [
+      { type: "text-delta", text: "Checking.\n" },
+      { type: "thinking-delta", text: "plan" },
+      { type: "text-delta", text: "Done." },
+    ] as const) {
+      for (const chunk of chunksFromInteractionUpdate(update, state, stream)) {
+        const content = chunk?.choices[0]?.delta.content;
+        if (content) contents.push(content);
+      }
+    }
+
+    expect(contents).toEqual(["Checking.\n", "Done."]);
   });
 
   test("final-content mode emits one content chunk at turn-end", () => {

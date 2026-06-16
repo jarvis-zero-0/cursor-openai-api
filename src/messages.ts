@@ -10,7 +10,9 @@ import {
   type ChatMessage,
 } from "./openai.js";
 import type { ClientToolSpec } from "./client-tools/types.js";
-import { serializeMessagesToPrompt } from "./prompt.js";
+import { serializeMessagesToPrompt, buildNativeToolDirective } from "./prompt.js";
+import type { NativeToolContext } from "./prompt.js";
+import type { CursorToolMode } from "./tool-mode.js";
 
 export interface PromptExtras {
   tools?: ChatCompletionRequest["tools"];
@@ -78,6 +80,8 @@ export function buildSendPayload(
   messages: ChatMessage[],
   extras?: PromptExtras,
   clientToolSpecs?: ClientToolSpec[],
+  toolMode?: CursorToolMode,
+  nativeCtx?: NativeToolContext,
 ): string | SDKUserMessage {
   switch (classifySendPayload(messages, extras, clientToolSpecs)) {
     case "client-tools":
@@ -89,11 +93,15 @@ export function buildSendPayload(
       return { text: text || "See attached image(s).", images };
     }
     case "plain-text":
+      if (toolMode === "native" && messages.length === 1) {
+        const text = contentToText(messages[0]!.content).trim();
+        return [buildNativeToolDirective(nativeCtx), text].filter(Boolean).join("\n\n");
+      }
       return messages
         .map((m) => contentToText(m.content))
         .filter(Boolean)
         .join("\n\n");
     case "full-prompt":
-      return serializeMessagesToPrompt(messages, extras);
+      return serializeMessagesToPrompt(messages, extras, undefined, toolMode, nativeCtx);
   }
 }

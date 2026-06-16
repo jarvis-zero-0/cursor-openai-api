@@ -16,17 +16,39 @@ export function emitAssistantText(
 ): ChatCompletionChunk | null {
   if (!text) return null;
   if (policy.assistantTextMode === "live") {
-    return chunkFromAssistantText(state, text);
+    const separated = applyPendingSeparator(state, text);
+    return chunkFromAssistantText(state, separated);
   }
   bufferAssistantText(state, text);
   return null;
+}
+
+// In live mode a boundary cannot rewrite already-emitted text, so it instead
+// records that the next text run must be separated. Inject a newline only when
+// neither side already supplies whitespace, avoiding fused sentences without
+// adding stray blank lines mid-paragraph.
+function applyPendingSeparator(state: StreamState, text: string): string {
+  if (!state.needsTextSeparator) return text;
+  state.needsTextSeparator = false;
+  const lastChar = state.text.slice(-1);
+  if (lastChar && !/\s/.test(lastChar) && !/^\s/.test(text)) {
+    return `\n${text}`;
+  }
+  return text;
 }
 
 export function* beforeInterleavedBoundary(
   state: StreamState,
   policy: TurnPolicy,
 ): Generator<ChatCompletionChunk | null> {
-  if (!state.pendingText || policy.assistantTextMode === "live") return;
+  if (policy.assistantTextMode === "live") {
+    if (state.text && !/\s$/.test(state.text)) {
+      state.needsTextSeparator = true;
+    }
+    return;
+  }
+
+  if (!state.pendingText) return;
 
   if (policy.assistantTextMode === "preamble-as-reasoning" && policy.includeThinking) {
     const flushed = flushBufferedAssistantTextAsReasoning(state);

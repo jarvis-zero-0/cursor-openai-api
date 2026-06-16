@@ -1,4 +1,11 @@
-import { Agent, type ModelSelection, type Run } from "@cursor/sdk";
+import {
+  Agent,
+  type ModelSelection,
+  type Run,
+  type SettingSource,
+} from "@cursor/sdk";
+import type { CursorToolMode } from "./tool-mode.js";
+import { resolveWorkspaceCwd } from "./workspace.js";
 import { buildSendOptions, pumpSdkMessageStream } from "./agent-stream.js";
 import { CursorMetaAccumulator } from "./cursor-meta.js";
 import { ProxyError, mapCursorError } from "./errors.js";
@@ -8,6 +15,7 @@ import {
   buildSendPayload,
   promptExtrasFromRequest,
 } from "./messages.js";
+import type { NativeToolContext } from "./prompt.js";
 import type {
   ChatCompletionChunk,
   ChatCompletionRequest,
@@ -47,11 +55,19 @@ export interface AgentTurnOutcome {
 function createAgentOptions(
   config: ProxyContext["config"],
   sdkModel: ModelSelection,
+  cwd: string,
+  toolMode: CursorToolMode,
 ) {
+  // Native-mode agents run Cursor's built-in tools directly against `cwd`, so
+  // load the workspace's project rules (AGENTS.md / .cursorrules) to steer them.
+  // Client/auto loops marshal tool calls back to the caller and never run SDK
+  // tools locally, so keep their setup minimal.
+  const settingSources: SettingSource[] =
+    toolMode === "native" ? ["project"] : [];
   return {
     apiKey: config.CURSOR_API_KEY,
     model: sdkModel,
-    local: { cwd: config.CURSOR_CWD, settingSources: [] },
+    local: { cwd, settingSources },
   };
 }
 
@@ -75,10 +91,25 @@ async function runTurnBody(
     prepared.sessionKey,
   );
 
+  // The native tool directive is a one-time system-style preamble. Reused
+  // (keyed/auto/resumed) agents already have it from the turn that created them,
+  // so only inject it on a fresh agent; otherwise every follow-up turn re-sends
+  // the whole ROLE/CAPABILITIES block and burns tokens.
+  const injectNativeDirective =
+    turnStream.policy.toolMode === "native" && prepared.isNewAgent;
+  const nativeCtx: NativeToolContext | undefined = injectNativeDirective
+    ? {
+        workspacePath: prepared.cwd,
+        proxyBaseUrl: `http://localhost:${config.PORT}`,
+      }
+    : undefined;
+
   const payload = buildSendPayload(
     prepared.deltaMessages,
     extras,
     turnStream.clientToolSpecs,
+    injectNativeDirective ? "native" : undefined,
+    nativeCtx,
   );
 
   let run: Run | undefined;
@@ -163,7 +194,13 @@ export async function executeAgentTurn(
     config,
     turnStream.policy.includeThinking,
   );
-  const agentOptions = createAgentOptions(config, resolved.sdk);
+  const cwd = resolveWorkspaceCwd(request, headers, config);
+  const agentOptions = createAgentOptions(
+    config,
+    resolved.sdk,
+    cwd,
+    turnStream.policy.toolMode,
+  );
 
   const prepared = await sessions.prepareChatSession(
     () => Agent.create(agentOptions),
@@ -172,6 +209,7 @@ export async function executeAgentTurn(
     config,
     headers,
     agentOptions,
+    cwd,
   );
 
   return sessions.withAgentTurn(prepared.agentId, () =>

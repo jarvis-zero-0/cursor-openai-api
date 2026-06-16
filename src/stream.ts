@@ -13,6 +13,10 @@ export interface StreamState {
   text: string;
   pendingText: string;
   reasoningText: string;
+  // Set when visible text is interrupted by an interleaved boundary (thinking
+  // or tool call) in live mode, so the next text run is separated rather than
+  // fused onto the previous one (e.g. "...feasible." + "Let me check...").
+  needsTextSeparator: boolean;
   usage?: OpenAIUsage;
   maxTokens?: number;
   cursorMeta: CursorCompletionMeta;
@@ -43,6 +47,7 @@ export function createStreamState(
     text: "",
     pendingText: "",
     reasoningText: "",
+    needsTextSeparator: false,
     maxTokens: options?.maxTokens,
     cursorMeta: { agent_id: options?.agentId ?? "" },
     toolCalls: new Map(),

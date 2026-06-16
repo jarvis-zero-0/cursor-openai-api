@@ -3,6 +3,55 @@ import { buildClientToolPromptSections } from "./client-tools/prompt.js";
 import type { ClientToolSpec } from "./client-tools/types.js";
 import type { ChatMessage } from "./openai.js";
 import type { PromptExtras } from "./messages.js";
+import type { CursorToolMode } from "./tool-mode.js";
+
+export interface NativeToolContext {
+  workspacePath?: string;
+  proxyBaseUrl?: string;
+}
+
+export function buildNativeToolDirective(ctx?: NativeToolContext): string {
+  const lines = [
+    "ROLE: You are a standalone Cursor SDK agent — a fully autonomous worker with native tooling.",
+    "",
+    "CAPABILITIES:",
+    "- Full Cursor built-in tools: Read, Shell, Write, Grep, Glob, StrReplace, EditNotebook, ReadLints, Task, SwitchMode, etc.",
+    "- You can read files, edit code, run commands, search the codebase, and make changes autonomously.",
+    "- Multi-step work happens inside this single turn — use as many tool calls as needed to complete the task.",
+    "",
+    "TOOL ROUTING (authoritative for this request):",
+    "- Use Cursor built-in tools directly. Do NOT use the Hermes/client marker protocol (<|tool_calls_begin|>, CLIENT TOOL INVENTORY, read_file/terminal via markers).",
+    "- If SYSTEM messages describe Hermes tools or marker invocation, they do not apply — you are fully delegated with native SDK access.",
+    "- Do not narrate instruction conflicts or ask to switch modes. Just do the work.",
+    "",
+    "COMPLETION / RETURNING CONTROL:",
+    "- You are a delegated worker, not the main thread. When your turn ends, control returns to the orchestrator that called you.",
+    "- Signal completion by ending your turn with a final text response — there is no done/stop token to emit. That final text is returned verbatim to the orchestrator as the task result.",
+    "- Write a clear, actionable summary: files changed, tests passed/failed, errors encountered, decisions made.",
+    "- The orchestrator cannot see your intermediate tool calls unless cursor_emit_tool_calls is enabled — your final text IS the deliverable.",
+    "- Do not ask follow-up questions — if blocked, explain what you tried and what failed.",
+    "- Do not suggest next steps unless the task description asks for recommendations.",
+  ];
+
+  if (ctx?.workspacePath) {
+    lines.push("", `WORKSPACE: ${ctx.workspacePath}`);
+  }
+
+  if (ctx?.proxyBaseUrl) {
+    lines.push(
+      "",
+      "SELF-REFERENCING (calling other models):",
+      `- The OpenAI-compatible proxy is at ${ctx.proxyBaseUrl}`,
+      "- To call another model for a subtask, use Shell with curl:",
+      `    curl -s ${ctx.proxyBaseUrl}/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"composer-2.5","messages":[{"role":"user","content":"..."}]}'`,
+      "- Use sparingly — prefer doing work directly with your SDK tools.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+export const NATIVE_TOOL_DIRECTIVE = buildNativeToolDirective();
 
 function formatToolCalls(message: ChatMessage): string {
   if (!message.tool_calls?.length) return "";
@@ -39,6 +88,8 @@ export function serializeMessagesToPrompt(
   messages: ChatMessage[],
   extras?: PromptExtras,
   clientToolSpecs?: ClientToolSpec[],
+  toolMode?: CursorToolMode,
+  nativeCtx?: NativeToolContext,
 ): string {
   if (clientToolSpecs?.length) {
     const sections = buildClientToolPromptSections(
@@ -49,11 +100,15 @@ export function serializeMessagesToPrompt(
     return appendPromptOptions(sections, extras, { skipTools: true }).join("\n");
   }
 
-  const sections: string[] = [
+  const sections: string[] = [];
+  if (toolMode === "native") {
+    sections.push(buildNativeToolDirective(nativeCtx), "");
+  }
+  sections.push(
     "You are responding through an OpenAI-compatible API proxy. Follow the conversation below.",
     "",
     ...messages.map(formatMessage),
-  ];
+  );
 
   return appendPromptOptions(sections, extras).join("\n");
 }
