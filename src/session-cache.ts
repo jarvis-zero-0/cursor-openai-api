@@ -6,6 +6,8 @@ export interface SessionEntry {
   agent: SDKAgent;
   agentId: string;
   modelId: string;
+  /** Workspace cwd the agent was created with; "" means unscoped (test entries). */
+  cwd: string;
   messageCount: number;
   messagesSnapshotHash: string;
   lastAccess: number;
@@ -15,6 +17,7 @@ export interface SessionRegistration {
   agent: SDKAgent;
   agentId: string;
   modelId: string;
+  cwd?: string;
   messageCount: number;
   messagesSnapshot: ChatMessage[];
   lastAccess: number;
@@ -24,6 +27,7 @@ export interface SessionSave {
   agent: SDKAgent;
   agentId: string;
   modelId: string;
+  cwd: string;
   messages: ChatMessage[];
   lastAccess: number;
 }
@@ -36,6 +40,18 @@ export interface SessionCacheLimits {
 export interface MatchedSession {
   key: string;
   entry: SessionEntry;
+}
+
+/**
+ * cwd is part of an agent's identity because `local.cwd` is frozen at
+ * `Agent.create` time. Entries without a recorded cwd ("") match anything so
+ * test fixtures and legacy entries keep working; a defined cwd only matches an
+ * equal request cwd. An `undefined` request cwd disables the filter.
+ */
+function cwdMatches(entry: SessionEntry, cwd: string | undefined): boolean {
+  if (!entry.cwd) return true;
+  if (cwd === undefined) return true;
+  return entry.cwd === cwd;
 }
 
 export function messagesPrefixMatches(
@@ -70,6 +86,7 @@ export class SessionCache {
   findAutoMatch(
     modelId: string,
     messages: ChatMessage[],
+    cwd?: string,
   ): MatchedSession | undefined {
     const keys = this.sessionKeysByModel.get(modelId);
     if (!keys?.size) return undefined;
@@ -82,6 +99,7 @@ export class SessionCache {
         this.untrackSessionKey(key, modelId);
         continue;
       }
+      if (!cwdMatches(entry, cwd)) continue;
       if (messages.length <= entry.messageCount) continue;
       if (!messagesPrefixMatches(messages, entry)) continue;
       if (!best || entry.messageCount > best.entry.messageCount) {
@@ -97,12 +115,15 @@ export class SessionCache {
     key: string,
     modelId: string,
     messages: ChatMessage[],
+    cwd?: string,
   ): MatchedSession | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
 
     const reusable =
-      entry.modelId === modelId && messagesPrefixMatches(messages, entry);
+      entry.modelId === modelId &&
+      cwdMatches(entry, cwd) &&
+      messagesPrefixMatches(messages, entry);
     if (!reusable) {
       this.invalidate(key);
       return undefined;
@@ -121,6 +142,7 @@ export class SessionCache {
       agent: entry.agent,
       agentId: entry.agentId,
       modelId: entry.modelId,
+      cwd: entry.cwd,
       messageCount: entry.messages.length,
       messagesSnapshotHash: hashMessageSnapshot(entry.messages),
       lastAccess: entry.lastAccess,
@@ -156,6 +178,7 @@ export class SessionCache {
       agent: entry.agent,
       agentId: entry.agentId,
       modelId: entry.modelId,
+      cwd: entry.cwd ?? "",
       messageCount: entry.messageCount,
       messagesSnapshotHash: hashMessageSnapshot(
         entry.messagesSnapshot.slice(0, entry.messageCount),
@@ -170,6 +193,26 @@ export class SessionCache {
     }
     this.sessions.clear();
     this.sessionKeysByModel.clear();
+  }
+
+  listEntries(): Array<{
+    session_id: string;
+    agent_id: string;
+    model_id: string;
+    cwd: string;
+    message_count: number;
+    last_access: number;
+  }> {
+    return [...this.sessions.entries()]
+      .map(([key, entry]) => ({
+        session_id: key,
+        agent_id: entry.agentId,
+        model_id: entry.modelId,
+        cwd: entry.cwd,
+        message_count: entry.messageCount,
+        last_access: entry.lastAccess,
+      }))
+      .sort((a, b) => b.last_access - a.last_access);
   }
 
   private pruneExpired(ttl: number): void {

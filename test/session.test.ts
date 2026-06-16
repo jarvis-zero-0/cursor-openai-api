@@ -48,6 +48,14 @@ describe("resolveSessionKey", () => {
     expect(key).toBeUndefined();
   });
 
+  test("reads metadata.hermes_session_id as stable keyed session", () => {
+    const key = resolveSessionKey({
+      messages: [{ role: "user", content: "hi" }],
+      metadata: { hermes_session_id: "20260615_abc123" },
+    });
+    expect(key).toBe("hermes:20260615_abc123");
+  });
+
   test("returns undefined when no session id", () => {
     const key = resolveSessionKey({
       messages: [{ role: "user", content: "hi" }],
@@ -168,6 +176,112 @@ describe("session speed alias reuse", () => {
 
     expect(prepared.agentId).toBe("agent-keyed-speed");
     expect(prepared.deltaMessages).toEqual([{ role: "user", content: "Follow up" }]);
+  });
+});
+
+describe("cwd-aware session reuse", () => {
+  const followUp = [
+    { role: "user" as const, content: "Hi" },
+    { role: "user" as const, content: "Follow up" },
+  ];
+
+  test("auto-match isolates agents by cwd", () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("auto:cwd-a", {
+      agent: { agentId: "agent-a" } as SDKAgent,
+      agentId: "agent-a",
+      modelId: "composer-2.5",
+      cwd: "/work/a",
+      messageCount: 1,
+      messagesSnapshot: [{ role: "user", content: "Hi" }],
+      lastAccess: Date.now(),
+    });
+    localStore.registerTestSession("auto:cwd-b", {
+      agent: { agentId: "agent-b" } as SDKAgent,
+      agentId: "agent-b",
+      modelId: "composer-2.5",
+      cwd: "/work/b",
+      messageCount: 1,
+      messagesSnapshot: [{ role: "user", content: "Hi" }],
+      lastAccess: Date.now(),
+    });
+
+    expect(
+      localStore.findMatchingSessionEntry("composer-2.5", followUp, "/work/a")?.entry.agentId,
+    ).toBe("agent-a");
+    expect(
+      localStore.findMatchingSessionEntry("composer-2.5", followUp, "/work/b")?.entry.agentId,
+    ).toBe("agent-b");
+    expect(
+      localStore.findMatchingSessionEntry("composer-2.5", followUp, "/work/c"),
+    ).toBeUndefined();
+
+    localStore.clearForTests();
+  });
+
+  test("keyed session is not reused across a different cwd", async () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("sess-cwd", {
+      agent: { agentId: "agent-cwd" } as SDKAgent,
+      agentId: "agent-cwd",
+      modelId: "composer-2.5",
+      cwd: "/work/a",
+      messageCount: 1,
+      messagesSnapshot: [{ role: "user", content: "Hi" }],
+      lastAccess: Date.now(),
+    });
+
+    let created = false;
+    const prepared = await localStore.prepareChatSession(
+      async () => {
+        created = true;
+        return { agentId: "agent-fresh" } as SDKAgent;
+      },
+      { messages: followUp, metadata: { session_id: "sess-cwd" } },
+      "composer-2.5",
+      baseConfig,
+      { "x-session-id": "sess-cwd" },
+      undefined,
+      "/work/b",
+    );
+
+    expect(created).toBe(true);
+    expect(prepared.agentId).toBe("agent-fresh");
+    expect(prepared.cwd).toBe("/work/b");
+    expect(prepared.isNewAgent).toBe(true);
+
+    localStore.clearForTests();
+  });
+
+  test("keyed session is reused when the cwd matches", async () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("sess-cwd-match", {
+      agent: { agentId: "agent-cwd-match" } as SDKAgent,
+      agentId: "agent-cwd-match",
+      modelId: "composer-2.5",
+      cwd: "/work/a",
+      messageCount: 1,
+      messagesSnapshot: [{ role: "user", content: "Hi" }],
+      lastAccess: Date.now(),
+    });
+
+    const prepared = await localStore.prepareChatSession(
+      async () => {
+        throw new Error("should reuse keyed session, not create");
+      },
+      { messages: followUp, metadata: { session_id: "sess-cwd-match" } },
+      "composer-2.5",
+      baseConfig,
+      { "x-session-id": "sess-cwd-match" },
+      undefined,
+      "/work/a",
+    );
+
+    expect(prepared.agentId).toBe("agent-cwd-match");
+    expect(prepared.cwd).toBe("/work/a");
+    expect(prepared.isNewAgent).toBe(false);
+
+    localStore.clearForTests();
   });
 });
 

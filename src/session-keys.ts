@@ -2,6 +2,7 @@ import type { ChatCompletionRequest } from "./openai.js";
 
 export interface SessionRequestHeaders {
   "x-session-id"?: string;
+  "x-cursor-cwd"?: string;
 }
 
 export function resolveSessionKey(
@@ -16,6 +17,13 @@ export function resolveSessionKey(
     const fromMeta =
       meta["session_id"]?.trim() || meta["sessionId"]?.trim();
     if (fromMeta) return fromMeta;
+
+    // Hermes and other gateways can pass a stable upstream session id so the
+    // proxy reuses one Cursor agent per logical conversation instead of
+    // relying on fragile auto-session message-prefix matching.
+    const hermesId =
+      meta["hermes_session_id"]?.trim() || meta["hermesSessionId"]?.trim();
+    if (hermesId) return `hermes:${hermesId}`;
   }
 
   return undefined;
