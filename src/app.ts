@@ -33,9 +33,28 @@ export function createApp(config: AppConfig): Hono {
     c.json({ status: "ok", runtime: "cursor-openai-api" }),
   );
 
+  app.get("/v1/sessions", (c) => {
+    if (!config.CURSOR_ENABLE_SESSIONS) {
+      return c.json({
+        object: "list",
+        data: [],
+        sessions_enabled: false,
+      });
+    }
+    return c.json({
+      object: "list",
+      data: proxy.sessions.listActiveSessions(),
+      sessions_enabled: true,
+    });
+  });
+
   app.get("/v1/models", async (c) => {
     try {
-      const models = await listModels(config.CURSOR_API_KEY);
+      const models = await listModels(
+        config.CURSOR_API_KEY,
+        config.CURSOR_EMIT_SPEED_ALIASES,
+        config.CURSOR_MODEL_ALLOWLIST,
+      );
       return c.json(models);
     } catch (err) {
       return proxyErrorResponse(mapCursorError(err));

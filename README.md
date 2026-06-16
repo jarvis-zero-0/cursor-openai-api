@@ -37,6 +37,9 @@ npm install
 | `CURSOR_INCLUDE_THINKING` | no | `true` | Stream thinking as `reasoning_content` / `reasoning` on deltas and the final message |
 | `CURSOR_ASSISTANT_TEXT_MODE` | no | `live` | How assistant `content` is streamed when text and thinking interleave: `live`, `final-content`, or `preamble-as-reasoning` (see [Assistant text modes](#assistant-text-modes)) |
 | `CURSOR_EMIT_TOOL_CALLS` | no | `false` | Surface Cursor's internal tool use as OpenAI `tool_calls` (see [Tool calls](#tool-calls) below) |
+| `CURSOR_TOOL_MODE` | no | `auto` | Default tool routing: `auto`, `client` (Hermes marker protocol), or `native` (full Cursor SDK tools). Per-request override: `cursor_tool_mode` (see [Hermes integration](#hermes-integration)) |
+| `CURSOR_EMIT_SPEED_ALIASES` | no | `true` | List synthetic `*-slow` / `*-fast` rows on `GET /v1/models` (requests still resolve when `false`) |
+| `CURSOR_MODEL_ALLOWLIST` | no | curated latest set | Comma-separated catalog ids for `GET /v1/models`. Omit for the built-in latest-only list; set `*` for the full Cursor catalog |
 | `CURSOR_ENABLE_SESSIONS` | no | `true` | Reuse Cursor SDK agents when the client supplies a session id |
 | `CURSOR_AUTO_SESSION` | no | `true` | Reuse agents when a request extends a prior in-memory conversation (for clients like AI SDK that resend full `messages[]`) |
 | `CURSOR_SESSION_TTL_MS` | no | `1800000` | Evict idle cached agents after this many ms |
@@ -101,6 +104,28 @@ List models (includes `display_name`, `description`, `cursor_aliases`, `cursor_p
 curl http://localhost:8080/v1/models
 ```
 
+### Model catalog filter
+
+By default, `GET /v1/models` exposes only the latest Cursor catalog skus (legacy models like `composer-2` or `claude-opus-4-7` are hidden). Model ids are the real sku strings from `Cursor.models.list()` — version numbers included.
+
+| Model id | Notes |
+|----------|-------|
+| `composer-2.5` | Default; fast tier |
+| `composer-2.5-slow` | Standard (non-fast) tier — cheaper |
+| `composer-2.5-fast` | Explicit fast alias |
+| `claude-opus-4-8` | |
+| `claude-sonnet-4-6` | |
+| `claude-haiku-4-5` | |
+| `gemini-3.5-flash` | |
+| `gemini-3.1-pro` | |
+| `gpt-5.5` | |
+
+Cursor also publishes stable alias ids (`opus-latest`, `gemini-flash-latest`, etc.) — those still work on chat requests but are not listed by default.
+
+The `*-slow` / `*-fast` rows are synthetic proxy aliases (see [Speed aliases](#speed-aliases--slow--fast)); only base catalog sku ids appear in `CURSOR_MODEL_ALLOWLIST`.
+
+Override with `CURSOR_MODEL_ALLOWLIST=composer-2.5,claude-opus-4-8` or set `CURSOR_MODEL_ALLOWLIST=*` for the full Cursor catalog.
+
 ### Composer fast mode
 
 On Cursor's catalog, **Composer 2 / 2.5 default to fast mode** (`fast=true`) — higher throughput, different pricing than the standard tier. That is the SDK/product default when you pass `model: "composer-2.5"` with no extra params.
@@ -124,7 +149,7 @@ For every catalog model that advertises both `fast=false` and `fast=true`, this 
 | `<base>-slow` | Sets `fast=false` on `<base>` (standard tier for Composer) |
 | `<base>-fast` | Sets `fast=true` on `<base>` |
 
-Examples: `composer-2.5-slow`, `claude-opus-4-7-fast`, `gpt-5.5-slow`.
+Examples: `composer-2.5-slow`, `claude-opus-4-8-fast`, `gpt-5.5-slow`.
 
 Explicit `cursor_model_params` with `id: "fast"` must agree with the alias; conflicting values are rejected. Aliases are not sent to Cursor as model ids — the proxy resolves to the base id plus params. Each request passes the resolved model (id + params) on `agent.send()`, so you can switch between `*-slow` and `*-fast` on a reused session without creating a new agent.
 
@@ -302,6 +327,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Liveness |
+| `GET /v1/sessions` | List active in-memory Cursor agent sessions (debug/observability) |
 | `GET /v1/models` | Cursor models via `Cursor.models.list()` |
 | `POST /v1/chat/completions` | Chat completions (JSON or SSE stream) |
 | `POST /v1/responses` | Responses API (JSON or typed SSE stream) |
@@ -311,7 +337,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 - **Runtime**: Local Cursor SDK agents only (`local: { cwd }`). Cloud agents are not exposed in this version.
 - **Messages**: OpenAI `messages[]` (chat) or `input` / `instructions` (responses) are serialized into one Cursor prompt per request; there is no server-side OpenAI thread store.
 - **Responses API**: `POST /v1/responses` accepts string or message-array `input`, maps to the same Cursor agent path as chat completions, and returns typed output items (`message`, `reasoning`, `function_call`). Streaming emits Responses lifecycle events.
-- **Sessions**: When `CURSOR_ENABLE_SESSIONS` is on (default), reuse a Cursor SDK agent by sending the same session id on each request (`X-Session-ID` header or `metadata.session_id` / `metadata.sessionId`), or rely on **auto-session** (`CURSOR_AUTO_SESSION`, default on): if a new request's `messages[]` extends a cached conversation prefix (same base catalog model id), the proxy reuses the agent without an explicit session header. Session matching uses the SDK catalog id (e.g. `composer-2.5`), not `*-slow` / `*-fast` aliases. Each turn still passes the request's resolved `model` (including `fast` and other `cursor_model_params`) on `agent.send()`, so speed aliases can change mid-conversation on the same agent. The OpenAI `user` field is passed through for client abuse-tracking only and is **not** used as a session key. Resume a known agent with `metadata.cursor_agent_id` (maps to `Agent.resume()`). Follow-ups only forward new messages to `agent.send()`; the agent keeps native multi-turn context.
+- **Sessions**: When `CURSOR_ENABLE_SESSIONS` is on (default), reuse a Cursor SDK agent by sending the same session id on each request (`X-Session-ID` header or `metadata.session_id` / `metadata.sessionId`), or rely on **auto-session** (`CURSOR_AUTO_SESSION`, default on): if a new request's `messages[]` extends a cached conversation prefix (same base catalog model id), the proxy reuses the agent without an explicit session header. Gateways like Hermes should pass `metadata.hermes_session_id` (mapped to a stable `hermes:<id>` cache key) so agent reuse survives tool loops and system-prompt changes that break prefix matching. List active sessions with `GET /v1/sessions`. Session matching uses the SDK catalog id (e.g. `composer-2.5`), not `*-slow` / `*-fast` aliases.
 - **Multi-turn history**: Prior assistant `reasoning_content` / `reasoning` in chat `messages[]` is preserved when serializing to the Cursor prompt. Chat-only request fields such as `response_format` and unknown passthrough JSON fields are included in the prompt.
 - **Finish reasons**: Emits `length` when `max_tokens` is set and reported completion tokens reach that cap; emits `tool_calls` only when Cursor tool calls are surfaced in the OpenAI response.
 - **Stream errors**: Errors are sent as standard OpenAI-style JSON in SSE `data:` lines (no separate `event: error`), matching `@ai-sdk/openai-compatible` parsers.
@@ -326,7 +352,27 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 
 ### Tool calls
 
-Three modes:
+Three routing modes, controlled by `cursor_tool_mode` (`auto` | `client` | `native`) or env `CURSOR_TOOL_MODE`:
+
+| Mode | When to use | Tool behavior |
+|------|-------------|---------------|
+| **`client`** | Hermes main thread, thinking, coding sub-turns | Marker protocol + CLIENT TOOL INVENTORY; Hermes executes tools locally |
+| **`native`** | `delegate_task` / standalone Cursor worker with no upstream tools | Full Cursor SDK tools (Read, Shell, Write, …); no marker protocol |
+| **`auto`** (default) | Generic OpenAI clients | `client` when request has non-empty `tools` and `tool_choice` ≠ `"none"`; otherwise plain/native |
+
+Set explicitly on each request (recommended for Hermes):
+
+```json
+{ "cursor_tool_mode": "client", "tools": [ ... ] }
+```
+
+```json
+{ "cursor_tool_mode": "native", "tool_choice": "none" }
+```
+
+Also accepted via `metadata.cursor_tool_mode` or `metadata.cursorToolMode`.
+
+Three HTTP-level behaviors:
 
 1. **Plain chat** (default) — `CURSOR_EMIT_TOOL_CALLS=false` and no `tools` on the request. Cursor may use its own tools in `CURSOR_CWD`, but the proxy does not surface them; `finish_reason` stays `stop` and only assistant text/reasoning is returned.
 
@@ -341,6 +387,70 @@ Three modes:
 3. **Cursor tool visibility** — `CURSOR_EMIT_TOOL_CALLS=true` (or `cursor_emit_tool_calls: true`) only when **not** in client tool loop. Surfaces Cursor SDK `tool-call-*` deltas as best-effort OpenAI `tool_calls` (Read, Shell, etc.). Usually **not** what you want alongside OpenCode's own `tools` array.
 
 **Note:** The SDK may still run Cursor's built-in tools in the workspace when the model ignores the client-tool prompt. The HTTP response only exposes **client** `tool_calls`. If you see unexpected file changes during client tool loops, treat that as a known limitation until a stricter SDK guard exists.
+
+**Identity confusion (Hermes / OpenCode):** When `cursor_tool_mode` is `client` (or `auto` with upstream tools), the proxy injects a marker-protocol directive that overrides tool *invocation* while preserving upstream persona/skills for content. Composer may still claim it is "Cursor IDE" and try native Read/Shell tools — the directive explicitly forbids that. For standalone delegation, pass `cursor_tool_mode: "native"` so the model uses full SDK tooling instead. Restart the proxy after updating `src/client-tools/prompt.ts`.
+
+## Hermes integration
+
+Jarvis/Hermes uses Composer via this proxy in two distinct shapes:
+
+### Main thread (orchestrator + tool loop)
+
+Hermes sends its tool schemas (`read_file`, `terminal`, `patch`, …) on every agent turn. Tell the proxy explicitly:
+
+```json
+{
+  "model": "composer-2.5",
+  "cursor_tool_mode": "client",
+  "tools": [ ... ],
+  "metadata": { "hermes_session_id": "<stable-id>" }
+}
+```
+
+- Proxy enters **client tool loop**: marker protocol, CLIENT TOOL INVENTORY, Hermes executes tools.
+- Hermes SOUL/skills/memory still apply to *what* to do; proxy controls *how* tools are invoked.
+- `cursor_tool_mode: "client"` makes the routing unambiguous even if auto-detection would have worked.
+
+### Standalone delegation (full Cursor SDK)
+
+When Hermes spawns a powerful standalone worker (`delegate_task`, coding agent, etc.) that should use Cursor's native tools directly:
+
+```json
+{
+  "model": "composer-2.5",
+  "cursor_tool_mode": "native",
+  "tool_choice": "none",
+  "messages": [{ "role": "user", "content": "Implement feature X in repo Y" }]
+}
+```
+
+- Omit `tools` (or set `tool_choice: "none"`).
+- Proxy injects a **native SDK directive** — use Read/Shell/Write/Grep, not marker protocol.
+- Optionally set `cursor_emit_tool_calls: true` to surface SDK tool use as OpenAI `tool_calls`.
+- Point `CURSOR_CWD` at the target workspace; use a separate session id from the main Hermes thread.
+
+### Lifecycle: completion & calling other models
+
+Both modes carry an explicit, symmetric contract so the model always knows how to signal it is done and how to reach another model:
+
+| Concern | `client` (main thread) | `native` (delegated worker) |
+|---------|------------------------|------------------------------|
+| Identity | Main agent / orchestrator — no upstream to hand back to | Delegated worker — returns to the orchestrator that called it |
+| Signal "done" | Stop emitting tool-call markers and write a final text answer. Absence of a marker ends the turn (`finish_reason: stop`) and returns control. No special done token. | End the turn with a final text response. That text is returned verbatim to the orchestrator. No special done token. |
+| Loop | Emit one marker → client runs it → `TOOL RESULT` comes back → continue | Use Cursor SDK tools directly across the single turn |
+| Call another model / subagent | Call a delegation tool (e.g. `delegate_task`) from CLIENT TOOL INVENTORY via the marker protocol; result returns as a `TOOL RESULT`. Don't curl the proxy. | `curl` the proxy at `proxyBaseUrl` (`/v1/chat/completions`); injected when the native worker is given the proxy base URL. |
+
+The key compatibility guarantee: in **neither** mode does the model emit a magic stop token — ending the turn (no markers in `client`, final text in `native`) is the completion signal, and each mode has exactly one sanctioned channel for invoking other models.
+
+### Quick reference
+
+| Call site | `cursor_tool_mode` | `tools` | Result |
+|-----------|-------------------|---------|--------|
+| Hermes main / thinking | `client` | Hermes schemas | Marker protocol |
+| `delegate_task` coding worker | `native` | omit / `tool_choice: none` | Full Cursor SDK |
+| Generic OpenAI client | `auto` (default) | as needed | Auto-detect |
+
+See `~/.hermes/jarvis-diary/learnings/2026-06-15-cursor-proxy-tool-routing.md` for troubleshooting identity confusion.
 
 - **Usage fields**: Mapped from Cursor `turn-ended` deltas (`onDelta` on `agent.send()`). `prompt_tokens` is total input-side tokens (input + cache read + cache write); `prompt_tokens_details.cached_tokens` reports cache reads per the OpenAI usage schema. Omitted when the SDK does not report usage for a turn.
 - **DEBUG_STREAM**: Status events only (`[status] ...` in `content`). Thinking uses `reasoning_content`, not `DEBUG_STREAM`.

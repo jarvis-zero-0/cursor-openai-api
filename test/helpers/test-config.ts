@@ -12,10 +12,14 @@ export function testProxyConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     DEBUG_STREAM: false,
     CURSOR_INCLUDE_THINKING: false,
     CURSOR_EMIT_TOOL_CALLS: false,
+    CURSOR_ASSISTANT_TEXT_MODE: "live",
+    CURSOR_TOOL_MODE: "auto",
     CURSOR_ENABLE_SESSIONS: true,
     CURSOR_AUTO_SESSION: true,
     CURSOR_SESSION_TTL_MS: 60_000,
     CURSOR_SESSION_MAX: 8,
+    CURSOR_EMIT_SPEED_ALIASES: true,
+    CURSOR_MODEL_ALLOWLIST: undefined,
     ...overrides,
   };
 }
@@ -23,6 +27,7 @@ export function testProxyConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 export const composerCatalogEntry = {
   id: "composer-2.5",
   displayName: "Composer 2.5",
+  aliases: ["composer-latest", "composer", "composer-2-5"],
   parameters: [{ id: "fast", values: [{ value: "false" }, { value: "true" }] }],
   variants: [
     {

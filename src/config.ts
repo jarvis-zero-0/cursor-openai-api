@@ -3,10 +3,19 @@ import {
   ASSISTANT_TEXT_MODES,
   DEFAULT_ASSISTANT_TEXT_MODE,
 } from "./assistant-text-mode.js";
+import {
+  CURSOR_TOOL_MODES,
+  DEFAULT_CURSOR_TOOL_MODE,
+} from "./tool-mode.js";
 
 const envSchema = z.object({
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
   CURSOR_CWD: z.string().min(1).default(process.cwd()),
+  // Comma-separated absolute roots a per-request `cursor_cwd` override may point
+  // at. Empty/unset = unrestricted (CURSOR_CWD is always implicitly allowed).
+  // The Hermes workspace lives outside the proxy repo and holds secrets, so gate
+  // any opt-in cwd override here rather than letting callers pick arbitrary paths.
+  CURSOR_CWD_ALLOWLIST: z.string().optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   HOST: z.string().default("0.0.0.0"),
   DEFAULT_MODEL: z.string().default("composer-2.5"),
@@ -24,10 +33,23 @@ const envSchema = z.object({
     .enum(["true", "false", "1", "0"])
     .optional()
     .transform((v) => v === "true" || v === "1"),
+  CURSOR_TOOL_MODE: z
+    .enum(CURSOR_TOOL_MODES)
+    .optional()
+    .default(DEFAULT_CURSOR_TOOL_MODE),
   CURSOR_ASSISTANT_TEXT_MODE: z
     .enum(ASSISTANT_TEXT_MODES)
     .optional()
     .default(DEFAULT_ASSISTANT_TEXT_MODE),
+  // When false, /v1/models omits the synthetic `*-slow` / `*-fast` rows
+  // (requests for those ids still resolve). Defaults to true.
+  CURSOR_EMIT_SPEED_ALIASES: z
+    .enum(["true", "false", "1", "0"])
+    .optional()
+    .transform((v) => v !== "false" && v !== "0"),
+  // Comma-separated catalog ids for GET /v1/models. Default: latest curated set.
+  // Use "*" to expose the full Cursor catalog (no filter).
+  CURSOR_MODEL_ALLOWLIST: z.string().optional(),
   CURSOR_ENABLE_SESSIONS: z
     .enum(["true", "false", "1", "0"])
     .optional()

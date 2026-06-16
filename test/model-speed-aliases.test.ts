@@ -4,6 +4,7 @@ import {
   clearModelCatalogCacheForTests,
   seedModelCatalogForTests,
 } from "../src/model-catalog-cache.js";
+import { DEFAULT_MODEL_ALLOWLIST } from "../src/model-catalog-filter.js";
 import {
   FAST_MODEL_PARAM_ID,
   fastParamValueForSpeedAlias,
@@ -29,7 +30,7 @@ afterEach(() => {
 });
 
 describe("resolveRequestedModelId", () => {
-  const catalog = new Set(["composer-2.5", "claude-opus-4-7"]);
+  const catalog = new Set(["composer-2.5", "composer-latest", "claude-opus-4-7"]);
 
   test("keeps exact catalog ids", () => {
     expect(resolveRequestedModelId("composer-2.5", catalog)).toEqual({
@@ -37,9 +38,15 @@ describe("resolveRequestedModelId", () => {
     });
   });
 
+  test("keeps exact alias ids", () => {
+    expect(resolveRequestedModelId("composer-latest", catalog)).toEqual({
+      baseId: "composer-latest",
+    });
+  });
+
   test("parses -slow suffix", () => {
-    expect(resolveRequestedModelId("composer-2.5-slow", catalog)).toEqual({
-      baseId: "composer-2.5",
+    expect(resolveRequestedModelId("composer-latest-slow", catalog)).toEqual({
+      baseId: "composer-latest",
       speedAlias: "slow",
     });
   });
@@ -184,6 +191,34 @@ describe("resolveModel speed aliases", () => {
     expect(resolved.sdk.params).toEqual([{ id: "fast", value: "true" }]);
   });
 
+  test("cursor alias ids still resolve on chat requests", async () => {
+    seedModelCatalogForTests("test-key", [composerCatalogEntry]);
+    const resolved = await resolveModel(
+      { messages: [{ role: "user", content: "hi" }], model: "composer-latest-slow" },
+      config,
+      false,
+    );
+    expect(resolved.clientModel).toBe("composer-latest-slow");
+    expect(resolved.sdk).toEqual({
+      id: "composer-latest",
+      params: [{ id: "fast", value: "false" }],
+    });
+  });
+
+  test("legacy version ids still resolve", async () => {
+    seedModelCatalogForTests("test-key", [composerCatalogEntry]);
+    const resolved = await resolveModel(
+      { messages: [{ role: "user", content: "hi" }], model: "composer-2.5-slow" },
+      config,
+      false,
+    );
+    expect(resolved.clientModel).toBe("composer-2.5-slow");
+    expect(resolved.sdk).toEqual({
+      id: "composer-2.5",
+      params: [{ id: "fast", value: "false" }],
+    });
+  });
+
   test("matching explicit cursor_model_params are allowed with alias", async () => {
     seedModelCatalogForTests("test-key", [composerCatalogEntry]);
     const resolved = await resolveModel(
@@ -261,7 +296,7 @@ describe("buildSendOptions", () => {
 describe("listModels speed aliases", () => {
   test("expands fast-capable models with slow and fast rows", async () => {
     seedModelCatalogForTests("list-key", [composerCatalogEntry, noFastCatalogEntry]);
-    const { data } = await listModels("list-key");
+    const { data } = await listModels("list-key", true, "*");
 
     expect(data.map((m) => m.id)).toEqual([
       "composer-2.5",
@@ -277,6 +312,7 @@ describe("listModels speed aliases", () => {
       cursor_model_params: [{ id: "fast", value: "false" }],
       display_name: "Composer 2.5 (Slow)",
     });
+    expect(slow?.cursor_catalog_id).toBeUndefined();
     expect(slow?.cursor_variants).toBeUndefined();
 
     const fast = data.find((m) => m.id === "composer-2.5-fast");
@@ -286,7 +322,7 @@ describe("listModels speed aliases", () => {
       cursor_model_params: [{ id: "fast", value: "true" }],
       display_name: "Composer 2.5 (Fast)",
     });
-    expect(fast?.cursor_variants).toBeUndefined();
+    expect(fast?.cursor_catalog_id).toBeUndefined();
   });
 
   test("does not emit speed alias rows that collide with real catalog ids", async () => {
@@ -298,7 +334,7 @@ describe("listModels speed aliases", () => {
         parameters: [{ id: "max_mode", values: [{ value: "on" }] }],
       },
     ]);
-    const { data } = await listModels("list-key");
+    const { data } = await listModels("list-key", true, "*");
 
     const fastRows = data.filter((m) => m.id === "composer-2.5-fast");
     expect(fastRows).toHaveLength(1);
@@ -309,5 +345,28 @@ describe("listModels speed aliases", () => {
       "composer-2.5-slow",
       "composer-2.5-fast",
     ]);
+  });
+
+  test("filters catalog to curated latest models by default", async () => {
+    seedModelCatalogForTests("list-key", [
+      composerCatalogEntry,
+      { id: "composer-2", displayName: "Composer 2" },
+      { id: "claude-opus-4-7", displayName: "Opus 4.7" },
+      {
+        id: "claude-opus-4-8",
+        displayName: "Opus 4.8",
+        aliases: ["opus-latest", "opus"],
+      },
+    ]);
+    const { data } = await listModels("list-key");
+
+    expect(data.map((m) => m.id)).toEqual([
+      "composer-2.5",
+      "composer-2.5-slow",
+      "composer-2.5-fast",
+      "claude-opus-4-8",
+    ]);
+    expect(DEFAULT_MODEL_ALLOWLIST).toContain("composer-2.5");
+    expect(DEFAULT_MODEL_ALLOWLIST).not.toContain("composer-2");
   });
 });
