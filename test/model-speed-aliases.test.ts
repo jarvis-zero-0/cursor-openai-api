@@ -310,7 +310,7 @@ describe("listModels speed aliases", () => {
       cursor_base_model: "composer-2.5",
       cursor_speed_alias: "slow",
       cursor_model_params: [{ id: "fast", value: "false" }],
-      display_name: "Composer 2.5 (Slow)",
+      display_name: "composer-2.5-slow",
     });
     expect(slow?.cursor_catalog_id).toBeUndefined();
     expect(slow?.cursor_variants).toBeUndefined();
@@ -320,7 +320,7 @@ describe("listModels speed aliases", () => {
       cursor_base_model: "composer-2.5",
       cursor_speed_alias: "fast",
       cursor_model_params: [{ id: "fast", value: "true" }],
-      display_name: "Composer 2.5 (Fast)",
+      display_name: "composer-2.5-fast",
     });
     expect(fast?.cursor_catalog_id).toBeUndefined();
   });
@@ -338,7 +338,7 @@ describe("listModels speed aliases", () => {
 
     const fastRows = data.filter((m) => m.id === "composer-2.5-fast");
     expect(fastRows).toHaveLength(1);
-    expect(fastRows[0]).toMatchObject({ display_name: "Real Composer Fast" });
+    expect(fastRows[0]).toMatchObject({ display_name: "composer-2.5-fast" });
     expect(fastRows[0]?.cursor_base_model).toBeUndefined();
     expect(data.map((m) => m.id)).toEqual([
       "composer-2.5",

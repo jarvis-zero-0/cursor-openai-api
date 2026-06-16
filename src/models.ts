@@ -11,7 +11,6 @@ import {
   type ModelSpeedAlias,
   fastParamValueForSpeedAlias,
   modelSupportsSpeedAliases,
-  speedAliasDisplayName,
   speedAliasModelId,
 } from "./model-aliases.js";
 import type { ModelsListResponse, OpenAIModel } from "./openai.js";
@@ -25,7 +24,9 @@ function catalogModelToOpenAI(m: SDKModel, publicId: string): OpenAIModel {
     object: "model",
     created: MODEL_CREATED,
     owned_by: "cursor",
-    ...(m.displayName ? { display_name: m.displayName } : {}),
+    // Mirror the catalog sku — clients must see the same string they pass in
+    // chat `model`, not Cursor's marketing label ("Opus 4.8", etc.).
+    display_name: publicId,
     ...(m.description ? { description: m.description } : {}),
     ...(publicId !== m.id ? { cursor_catalog_id: m.id } : {}),
     ...(m.aliases?.length ? { cursor_aliases: m.aliases } : {}),
@@ -44,7 +45,7 @@ function speedAliasOpenAIModel(
     object: "model",
     created: MODEL_CREATED,
     owned_by: "cursor",
-    display_name: speedAliasDisplayName(m.displayName, alias),
+    display_name: speedAliasModelId(publicId, alias),
     ...(m.description ? { description: m.description } : {}),
     ...(m.parameters?.length ? { cursor_parameters: m.parameters } : {}),
     cursor_base_model: publicId,
