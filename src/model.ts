@@ -14,6 +14,10 @@ import {
   resolveSpeedAliasParams,
 } from "./model-aliases.js";
 import { listCachedModels } from "./model-catalog-cache.js";
+import {
+  buildCatalogLookup,
+  resolveCatalogEntry,
+} from "./model-catalog-filter.js";
 import { resolveIncludeThinking } from "./turn-policy.js";
 
 /** Proxy resolution of a request model id → SDK selection + client echo id. */
@@ -146,9 +150,12 @@ export async function resolveModel(
   const catalog = needsCatalog
     ? await listCachedModels(config.CURSOR_API_KEY)
     : undefined;
-  const catalogIds = catalog ? new Set(catalog.map((m) => m.id)) : undefined;
+  const lookup = catalog ? buildCatalogLookup(catalog) : undefined;
+  const catalogIds = lookup?.allKnownIds;
   const { baseId, speedAlias } = resolveRequestedModelId(requestedId, catalogIds);
-  const catalogModel = catalog?.find((m) => m.id === baseId);
+  const catalogModel = lookup
+    ? resolveCatalogEntry(baseId, lookup)
+    : undefined;
 
   const aliasFastValue = resolveSpeedAliasParams({
     requestedId,
