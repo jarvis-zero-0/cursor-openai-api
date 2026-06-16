@@ -9,8 +9,9 @@ export interface ClientToolPromptPolicy {
 }
 
 function isWorkspaceMutationToolName(name: string): boolean {
-  return ["write", "edit", "bash", "shell"].includes(
-    name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return ["write", "edit", "bash", "shell", "writefile", "patch", "terminal"].includes(
+    normalized,
   );
 }
 
@@ -56,6 +57,6 @@ export function addWorkspaceActionToUserText(text: string): string {
   return [
     userText,
     "",
-    "Workspace action required: create or update the necessary project files directly with write/edit/bash tools. Do not output code for the user to save.",
+    "Workspace action required: create or update the necessary project files directly with the client's file/shell tools from CLIENT TOOL INVENTORY. Do not output code for the user to save.",
   ].join("\n");
 }

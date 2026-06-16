@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ASSISTANT_TEXT_MODES } from "./assistant-text-mode.js";
+import { CURSOR_TOOL_MODES } from "./tool-mode.js";
 import { messageContentSchema } from "./content-part-schema.js";
 import { makeId } from "./ids.js";
 
@@ -59,6 +60,8 @@ const chatCompletionRequestShape = {
   reasoning_effort: z.string().optional(),
   cursor_include_thinking: z.boolean().optional(),
   cursor_emit_tool_calls: z.boolean().optional(),
+  cursor_tool_mode: z.enum(CURSOR_TOOL_MODES).optional(),
+  cursor_cwd: z.string().optional(),
   cursor_assistant_text_mode: z.enum(ASSISTANT_TEXT_MODES).optional(),
   response_format: z.unknown().optional(),
   verbosity: z.string().optional(),
@@ -209,7 +212,9 @@ export type OpenAIModel = {
   cursor_aliases?: string[];
   cursor_parameters?: CursorModelParameterDefinition[];
   cursor_variants?: CursorModelVariant[];
-  /** Base Cursor catalog id when this row is a proxy `*-slow` / `*-fast` alias. */
+  /** Underlying Cursor catalog id when `id` is a stable alias (e.g. `opus-latest`). */
+  cursor_catalog_id?: string;
+  /** Base public model id when this row is a proxy `*-slow` / `*-fast` alias. */
   cursor_base_model?: string;
   cursor_speed_alias?: "slow" | "fast";
   /** Params applied by the alias unless overridden via `cursor_model_params`. */

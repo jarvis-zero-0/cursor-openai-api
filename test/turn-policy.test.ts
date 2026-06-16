@@ -11,6 +11,7 @@ const baseConfig = {
   DEFAULT_MODEL: "composer-2.5",
   CURSOR_INCLUDE_THINKING: true,
   CURSOR_EMIT_TOOL_CALLS: true,
+  CURSOR_TOOL_MODE: "auto" as const,
   CURSOR_ASSISTANT_TEXT_MODE: "live" as const,
   CURSOR_ENABLE_SESSIONS: true,
   CURSOR_AUTO_SESSION: true,
@@ -65,5 +66,18 @@ describe("resolveTurnPolicy", () => {
     const policy = resolveTurnPolicy(request, baseConfig);
     expect(policy.emitCursorTools).toBe(true);
     expect(policy.clientToolLoop).toBe(false);
+  });
+
+  test("native tool mode disables client tool loop", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "echo" } }],
+      cursor_tool_mode: "native",
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.toolMode).toBe("native");
+    expect(policy.clientToolLoop).toBe(false);
+    expect(policy.emitCursorTools).toBe(true);
   });
 });

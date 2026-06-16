@@ -1,15 +1,21 @@
 import type { AppConfig } from "./config.js";
 import type { AssistantTextMode } from "./assistant-text-mode.js";
 import { resolveAssistantTextMode } from "./assistant-text-mode.js";
-import { isClientToolLoop } from "./client-tools/request.js";
 import type { ChatCompletionRequest } from "./openai.js";
+import {
+  resolveClientToolLoopEnabled,
+  resolveCursorToolMode,
+  type CursorToolMode,
+} from "./tool-mode.js";
 
 export type { AssistantTextMode } from "./assistant-text-mode.js";
+export type { CursorToolMode } from "./tool-mode.js";
 
 export interface TurnPolicy {
   includeThinking: boolean;
   emitCursorTools: boolean;
   clientToolLoop: boolean;
+  toolMode: CursorToolMode;
   debugStream: boolean;
   assistantTextMode: AssistantTextMode;
 }
@@ -38,7 +44,8 @@ export function resolveTurnPolicy(
   request: ChatCompletionRequest,
   config: AppConfig,
 ): TurnPolicy {
-  const clientToolLoop = isClientToolLoop(request);
+  const toolMode = resolveCursorToolMode(request, config);
+  const clientToolLoop = resolveClientToolLoopEnabled(request, toolMode);
   const includeThinking = resolveIncludeThinking(request, config);
   const emitCursorTools =
     !clientToolLoop && resolveEmitToolCalls(request, config);
@@ -46,6 +53,7 @@ export function resolveTurnPolicy(
     includeThinking,
     emitCursorTools,
     clientToolLoop,
+    toolMode,
     debugStream: config.DEBUG_STREAM ?? false,
     assistantTextMode: resolveAssistantTextMode(request, config),
   };
