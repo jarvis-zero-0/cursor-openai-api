@@ -42,6 +42,9 @@ npm install
 | `CURSOR_TOOL_ALLOWLIST` | no | — | Comma-separated tool-name patterns to keep (`*` suffix = prefix match). Per-request override: `cursor_tools_allow` |
 | `CURSOR_TOOL_DENYLIST` | no | — | Comma-separated tool-name patterns to drop (e.g. `browser_*,computer_use,cronjob`). Per-request override: `cursor_tools_deny` |
 | `CURSOR_TOOLSETS_KEEP_UNMAPPED` | no | `true` | When toolset filtering is active, keep tools with no known toolset. Per-request override: `cursor_toolsets_keep_unmapped` |
+| `CURSOR_TOOL_TIER` | no | `full` | Progressive disclosure of the client inventory: `full`, `tiered`, or `brief` (see [Tool tiers](#tool-tiers-progressive-disclosure)). Per-request override: `cursor_tool_tier` |
+| `CURSOR_TOOL_RESIDENT` | no | curated set | Comma-separated tool names kept at full schema in `tiered` mode. Per-request override: `cursor_tool_resident` |
+| `CURSOR_TOOL_USAGE_LOG` | no | — | Path to append a JSONL record of every client tool call, for tuning tiers |
 | `CURSOR_EMIT_SPEED_ALIASES` | no | `true` | List synthetic `*-slow` / `*-fast` rows on `GET /v1/models` (requests still resolve when `false`) |
 | `CURSOR_MODEL_ALLOWLIST` | no | curated latest set | Comma-separated catalog ids for `GET /v1/models`. Omit for the built-in latest-only list; set `*` for the full Cursor catalog |
 | `CURSOR_ENABLE_SESSIONS` | no | `true` | Reuse Cursor SDK agents when the client supplies a session id |
@@ -110,7 +113,7 @@ curl http://localhost:8080/v1/models
 
 ### Model catalog filter
 
-By default, `GET /v1/models` exposes only the latest Cursor catalog skus (legacy models like `composer-2` or `claude-opus-4-7` are hidden). Model ids are the real sku strings from `Cursor.models.list()` — version numbers included.
+By default, `GET /v1/models` exposes only the latest Cursor catalog skus (legacy models like `composer-2` or `claude-opus-4-7` are hidden). Both `id` and `display_name` are the catalog sku string — the same value you pass in chat `model` (e.g. `claude-opus-4-8`, not Cursor's UI label "Opus 4.8").
 
 | Model id | Notes |
 |----------|-------|
@@ -428,6 +431,26 @@ bun run scripts/measure-tool-tokens.ts --deny 'browser_*,cronjob' --toolsets fil
 ```
 
 > Note: filtering applies to the client-mode marker inventory (`clientToolSpecs`). In client mode the inventory is already serialized **once** (no `tools` array is forwarded to the Cursor SDK), so the lever here is trimming the set, not de-duplicating it.
+
+### Tool tiers (progressive disclosure)
+
+Filtering removes tools entirely. Tiering keeps **every tool callable** but renders the rarely-used ones compactly. The insight: the model only needs a tool's **name + argument names** to emit a correct marker call — Hermes (the executor) already holds the full schema — so the verbose prose schema can be replaced with a one-line signature.
+
+Set `cursor_tool_tier` (request), `metadata.cursor_tool_tier`, or `CURSOR_TOOL_TIER`:
+
+| Mode | Rendering | Sample size |
+|------|-----------|-------------|
+| `full` (default) | Every tool gets its full JSON schema | baseline |
+| `tiered` | Resident tools full; the rest as `name(arg1, arg2?) — summary` | −54% |
+| `brief` | Every tool as a signature line | −86% |
+
+In `tiered` mode the resident set (full-schema tools) defaults to `read_file, write_file, patch, search_files, terminal, delegate_task` and is overridable via `cursor_tool_resident` / `CURSOR_TOOL_RESIDENT`. Brief entries mark optional args with `?`.
+
+```json
+{ "model": "composer-2.5", "cursor_tool_mode": "client", "cursor_tool_tier": "brief", "tools": [ ... ] }
+```
+
+To choose a resident set from real usage, set `CURSOR_TOOL_USAGE_LOG=/path/to/tool-usage.jsonl`; every client tool call is appended as `{"ts","tool"}`. Measure tier savings with `bun run scripts/measure-tool-tokens.ts` (now includes `tiered` / `brief` scenarios).
 
 ## Hermes integration
 

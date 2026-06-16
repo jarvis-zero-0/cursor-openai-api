@@ -117,6 +117,53 @@ describe("serializeMessagesToPrompt", () => {
     expect(prompt).toContain("delegate_task");
   });
 
+  test("tiered tool mode renders resident schemas full and the rest brief", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Hi" }],
+      {
+        tools: [
+          { type: "function", function: { name: "read_file" } },
+          { type: "function", function: { name: "cronjob" } },
+        ],
+        toolTier: { mode: "tiered", resident: new Set(["read_file"]) },
+      },
+      [
+        { name: "read_file", description: "Read a file.", parameters: { type: "object", properties: { path: {} }, required: ["path"] } },
+        { name: "cronjob", description: "Manage cron. Second sentence.", parameters: { type: "object", properties: { action: {}, job_id: {} }, required: ["action"] } },
+      ],
+    );
+    expect(prompt).toContain("BRIEF TOOLS");
+    expect(prompt).toContain("cronjob(action, job_id?) — Manage cron.");
+    expect(prompt).toContain('{"name":"read_file"');
+    expect(prompt).not.toContain('{"name":"cronjob"');
+  });
+
+  test("brief tool mode renders every tool as a signature", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Hi" }],
+      {
+        tools: [{ type: "function", function: { name: "terminal" } }],
+        toolTier: { mode: "brief", resident: new Set() },
+      },
+      [
+        { name: "terminal", description: "Run shell.", parameters: { type: "object", properties: { command: {}, timeout: {} }, required: ["command"] } },
+      ],
+    );
+    expect(prompt).toContain("BRIEF TOOLS");
+    expect(prompt).toContain("terminal(command, timeout?) — Run shell.");
+    expect(prompt).not.toContain('{"name":"terminal"');
+  });
+
+  test("default (no tier) still renders full schemas", () => {
+    const prompt = serializeMessagesToPrompt(
+      [{ role: "user", content: "Hi" }],
+      { tools: [{ type: "function", function: { name: "foo" } }] },
+      [{ name: "foo", description: "Foo tool.", parameters: { type: "object", properties: {} } }],
+    );
+    expect(prompt).not.toContain("BRIEF TOOLS");
+    expect(prompt).toContain('{"name":"foo"');
+  });
+
   test("native mode explains how to signal completion / return control", () => {
     const prompt = serializeMessagesToPrompt(
       [{ role: "user", content: "Refactor auth.ts" }],

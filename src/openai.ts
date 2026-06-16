@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ASSISTANT_TEXT_MODES } from "./assistant-text-mode.js";
 import { CURSOR_TOOL_MODES } from "./tool-mode.js";
+import { TOOL_TIER_MODES } from "./client-tools/catalog.js";
 import { messageContentSchema } from "./content-part-schema.js";
 import { makeId } from "./ids.js";
 
@@ -65,6 +66,8 @@ const chatCompletionRequestShape = {
   cursor_tools_allow: z.array(z.string()).optional(),
   cursor_tools_deny: z.array(z.string()).optional(),
   cursor_toolsets_keep_unmapped: z.boolean().optional(),
+  cursor_tool_tier: z.enum(TOOL_TIER_MODES).optional(),
+  cursor_tool_resident: z.array(z.string()).optional(),
   cursor_cwd: z.string().optional(),
   cursor_assistant_text_mode: z.enum(ASSISTANT_TEXT_MODES).optional(),
   response_format: z.unknown().optional(),

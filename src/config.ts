@@ -7,6 +7,7 @@ import {
   CURSOR_TOOL_MODES,
   DEFAULT_CURSOR_TOOL_MODE,
 } from "./tool-mode.js";
+import { TOOL_TIER_MODES } from "./client-tools/catalog.js";
 
 const envSchema = z.object({
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
@@ -62,6 +63,16 @@ const envSchema = z.object({
     .enum(["true", "false", "1", "0"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true" || v === "1")),
+  // Progressive disclosure of the client-mode inventory. `full` (default) keeps
+  // every schema; `tiered` gives resident tools full schemas and the rest brief
+  // signatures; `brief` renders all tools as signatures. Per-request override:
+  // cursor_tool_tier.
+  CURSOR_TOOL_TIER: z.enum(TOOL_TIER_MODES).optional(),
+  // Comma-separated tool names kept resident (full schema) in `tiered` mode.
+  CURSOR_TOOL_RESIDENT: z.string().optional(),
+  // Optional path to append a JSONL record of every client tool call (Phase 3
+  // usage telemetry for tuning resident vs brief tiers).
+  CURSOR_TOOL_USAGE_LOG: z.string().optional(),
   CURSOR_ENABLE_SESSIONS: z
     .enum(["true", "false", "1", "0"])
     .optional()

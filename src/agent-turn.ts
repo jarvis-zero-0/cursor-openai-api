@@ -15,6 +15,7 @@ import {
   buildSendPayload,
   promptExtrasFromRequest,
 } from "./messages.js";
+import { resolveToolTier } from "./client-tools/catalog.js";
 import type { NativeToolContext } from "./prompt.js";
 import type {
   ChatCompletionChunk,
@@ -81,6 +82,7 @@ async function runTurnBody(
   const { request, proxy, abortSignal } = ctx;
   const { config, sessions } = proxy;
   const extras = promptExtrasFromRequest(request);
+  extras.toolTier = resolveToolTier(request, config);
 
   const state = createStreamState(resolved.clientModel, {
     maxTokens: request.max_tokens,

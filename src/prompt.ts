@@ -96,6 +96,7 @@ export function serializeMessagesToPrompt(
       messages,
       clientToolSpecs,
       extras?.toolChoice,
+      extras?.toolTier,
     );
     return appendPromptOptions(sections, extras, { skipTools: true }).join("\n");
   }

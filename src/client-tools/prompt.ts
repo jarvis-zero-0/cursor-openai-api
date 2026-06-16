@@ -5,7 +5,18 @@ import {
   addWorkspaceActionToUserText,
   resolveClientToolPromptPolicy,
 } from "./policy.js";
+import {
+  DEFAULT_TOOL_TIER_MODE,
+  briefToolLine,
+  splitToolTiers,
+  type ToolTierPolicy,
+} from "./catalog.js";
 import type { ClientToolSpec } from "./types.js";
+
+const FULL_TIER: ToolTierPolicy = {
+  mode: DEFAULT_TOOL_TIER_MODE,
+  resident: new Set(),
+};
 
 const TOOL_SYSTEM_DIRECTIVE = [
   "You are serving an OpenAI-compatible API request through Cursor Composer.",
@@ -65,6 +76,7 @@ function appendChatTools(
   sections: string[],
   tools: ClientToolSpec[],
   toolChoice: ReturnType<typeof parseToolChoice>,
+  tier: ToolTierPolicy,
 ): void {
   if (!tools.length) return;
   sections.push(
@@ -75,13 +87,21 @@ function appendChatTools(
     "If the task requires creating or changing files, call the client's file/shell tools from the inventory (e.g. write_file, patch, terminal). Do not provide a code block and ask the user to save it.",
     ...MARKER_TEMPLATE,
   );
-  for (const tool of tools) {
+  const { full, brief } = splitToolTiers(tools, tier);
+  for (const tool of full) {
     sections.push(
       JSON.stringify({
         name: tool.name,
         ...(tool.description ? { description: tool.description } : {}),
         ...(tool.parameters !== undefined ? { parameters: tool.parameters } : {}),
       }),
+    );
+  }
+  if (brief.length) {
+    sections.push(
+      "",
+      "BRIEF TOOLS — call these by their exact name using the argument names shown (`?` marks optional); full JSON schemas are omitted to save context. The arguments listed are complete:",
+      ...brief.map(briefToolLine),
     );
   }
   if (
@@ -143,12 +163,13 @@ export function buildClientToolPromptSections(
   messages: ChatMessage[],
   tools: ClientToolSpec[],
   toolChoice: unknown,
+  tier: ToolTierPolicy = FULL_TIER,
 ): string[] {
   const policy = resolveClientToolPromptPolicy(messages, tools);
   const parsedToolChoice = parseToolChoice(toolChoice);
 
   const sections: string[] = [TOOL_SYSTEM_DIRECTIVE];
-  appendChatTools(sections, tools, parsedToolChoice);
+  appendChatTools(sections, tools, parsedToolChoice, tier);
   appendWorkspaceMutationRequirement(
     sections,
     policy.workspaceMutationRequired,

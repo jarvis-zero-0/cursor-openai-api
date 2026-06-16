@@ -18,6 +18,12 @@ import { dirname, resolve } from "node:path";
 import type { ClientToolSpec } from "../src/client-tools/types.js";
 import { applyToolFilter, type ToolFilter } from "../src/client-tools/filter.js";
 import { toolsetForTool } from "../src/client-tools/toolsets.js";
+import {
+  DEFAULT_RESIDENT_TOOLS,
+  briefToolLine,
+  splitToolTiers,
+  type ToolTierPolicy,
+} from "../src/client-tools/catalog.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +69,20 @@ function estTokens(chars: number): number {
 
 function totalChars(specs: ClientToolSpec[]): number {
   return specs.reduce((sum, spec) => sum + serializeTool(spec).length + 1, 0);
+}
+
+/** Chars when rendered under a tier policy (full schema + brief signatures). */
+function tierChars(specs: ClientToolSpec[], tier: ToolTierPolicy): number {
+  const { full, brief } = splitToolTiers(specs, tier);
+  const fullChars = full.reduce(
+    (sum, spec) => sum + serializeTool(spec).length + 1,
+    0,
+  );
+  const briefChars = brief.reduce(
+    (sum, spec) => sum + briefToolLine(spec).length + 1,
+    0,
+  );
+  return fullChars + briefChars;
 }
 
 function asList(value: string | boolean | undefined): string[] | undefined {
@@ -148,6 +168,24 @@ function main(): void {
   for (const { label, filter } of scenarios) {
     report(label, applyToolFilter(specs, filter), baseline);
   }
+
+  console.log("\nTier scenarios (progressive disclosure, vs full inventory):");
+  const tierScenarios: Array<{ label: string; tier: ToolTierPolicy }> = [
+    {
+      label: "tiered (resident full + rest brief)",
+      tier: { mode: "tiered", resident: new Set(DEFAULT_RESIDENT_TOOLS) },
+    },
+    { label: "brief (all signatures)", tier: { mode: "brief", resident: new Set() } },
+  ];
+  for (const { label, tier } of tierScenarios) {
+    const chars = tierChars(specs, tier);
+    const pct = Math.round((1 - chars / baseline) * 100);
+    console.log(
+      `  ${label.padEnd(34)} ${String(specs.length).padStart(2)} tools  ` +
+        `${String(chars).padStart(6)} chars  ~${String(estTokens(chars)).padStart(5)} tok  (-${pct}%)`,
+    );
+  }
+
   if (hasCli) {
     console.log("\nCLI filter:");
     report("custom (from args)", applyToolFilter(specs, cliFilter), baseline);

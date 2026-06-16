@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from "./openai.js";
 import type { ClientToolSpec } from "./client-tools/types.js";
+import type { ToolTierPolicy } from "./client-tools/catalog.js";
 import { serializeMessagesToPrompt, buildNativeToolDirective } from "./prompt.js";
 import type { NativeToolContext } from "./prompt.js";
 import type { CursorToolMode } from "./tool-mode.js";
@@ -17,6 +18,7 @@ import type { CursorToolMode } from "./tool-mode.js";
 export interface PromptExtras {
   tools?: ChatCompletionRequest["tools"];
   toolChoice?: ChatCompletionRequest["tool_choice"];
+  toolTier?: ToolTierPolicy;
   temperature?: number;
   topP?: number;
   maxTokens?: number;

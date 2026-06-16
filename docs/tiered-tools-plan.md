@@ -81,26 +81,64 @@ Measured impact (bundled representative sample, schemas partially trimmed so abs
 
 Next within Phase 0 (optional): trim description verbosity (terse spec in inventory, guidance in skills/docs).
 
-### Phase 1 — Brief catalog + describe meta-tool
+### Phase 1 — Brief catalog (progressive disclosure) — DONE (proxy-side)
 
-Target: Hermes Agent orchestrator layer (may require upstream coordination).
+> **Discovery 2026-06-15 (runtime trace):** In client mode the proxy is **not** a
+> cross-turn executor. The marker parser turns any tool-call marker into an OpenAI
+> `tool_call` and ends the turn (`finish_reason: tool_calls`); Hermes executes it
+> and re-sends. So a synthetic `describe_tool` / `expand_tools` meta-tool (the
+> original Tier 2) would be returned to Hermes, which has no handler — making it
+> require either an internal SDK re-send sub-loop (not verifiable without a live
+> Cursor key) or upstream Hermes work.
+>
+> **The cleaner realization that needs neither:** the model does not need a tool's
+> full prose JSON schema to emit a correct marker call — it only needs the tool
+> **name + argument names**. Hermes (the executor) already holds the real schemas.
+> So rarely-used tools can be rendered as a compact **signature**
+> (`name(arg1, arg2?) — first sentence`) instead of full JSON, fully end-to-end,
+> no upstream change, no meta-tool round trip. This makes the brief catalog the
+> shippable core of Phase 1 and the `expand_tools` meta-tool unnecessary for the
+> common case.
 
-1. Replace full schemas in the default orchestrator tool list with brief catalog entries.
-2. Implement `describe_tool` / `expand_toolset` meta-tool.
-3. Move heavy tools out of the orchestrator default set into toolsets that only workers load.
-4. Define which tools stay resident in Tier 1 based on usage frequency.
+Implemented in cursor-openai-api:
 
-### Phase 2 — Auto-routing to workers
+- `src/client-tools/catalog.ts`: `toolSignature`, `briefToolLine`, `firstSentence`, `splitToolTiers`, `resolveToolTier`, and the default resident set.
+- Three render modes via `cursor_tool_tier` / `CURSOR_TOOL_TIER`: `full` (default, legacy), `tiered` (resident full + rest brief), `brief` (all signatures). Resident set via `cursor_tool_resident` / `CURSOR_TOOL_RESIDENT`.
+- Wired through `PromptExtras.toolTier` → `serializeMessagesToPrompt` → `buildClientToolPromptSections` → `appendChatTools`. Default `full` keeps existing behavior byte-for-byte.
+- Tests: `test/client-tools/catalog.test.ts`, tiered/brief cases in `test/prompt.test.ts`.
 
-1. Orchestrator selects toolset(s) from brief catalog.
-2. Delegates to a worker pre-loaded with expanded toolset via `delegate_task`.
-3. Worker executes with full schemas; orchestrator receives summary only.
+Measured impact (same representative sample; **all tools remain callable**):
 
-### Phase 3 — Tune from real usage
+| Mode | Result |
+|------|--------|
+| `tiered` (resident full + rest brief) | −54% |
+| `brief` (all signatures) | −86% |
 
-1. Log which tools/toolsets are requested per session type.
-2. Adjust resident vs lazy boundaries.
-3. Trim long descriptions upstream: terse spec in schema, detailed guidance in skills/docs loaded on demand.
+The `expand_tools` meta-tool (full-schema-on-demand) is deferred: it needs the
+runtime sub-loop below and only matters when the model wants detailed guidance,
+which the brief signature already covers for calling.
+
+### Phase 2 — Auto-routing to workers — reframed (mostly Hermes-side)
+
+Worker delegation is executed by Hermes via the existing `delegate_task`
+(`toolsets` arg) — the proxy cannot auto-delegate because it does not execute
+tools. The proxy's contribution is making heavy tools cheap to *advertise* so an
+orchestrator can see and route to them without paying full-schema cost: that is
+exactly the Phase 1 brief tier. No further proxy change is required for routing;
+true auto-routing (orchestrator → worker) lives in Hermes.
+
+Optional future proxy work: an internal **meta-tool sub-loop** — intercept an
+`expand_tools` marker, resolve the full schema in-proxy, re-send to the Cursor
+agent, and surface only the final client tool call. Designed but not wired,
+because it changes streaming-turn semantics and needs live Cursor verification.
+
+### Phase 3 — Tune from real usage — DONE (telemetry shipped)
+
+- `src/client-tools/usage-log.ts`: in-memory per-tool call counter (always on, cheap) plus an optional JSONL audit trail via `CURSOR_TOOL_USAGE_LOG`. Hooked into `text-handler` at the point markers become OpenAI tool calls. Telemetry never throws into a turn.
+- `getToolUsage()` returns counts highest-first → use it to choose the resident set (`CURSOR_TOOL_RESIDENT`) from real calls instead of guesses.
+- Tests: `test/client-tools/usage-log.test.ts`.
+
+Remaining (upstream, lower priority): trim long descriptions at the Hermes source (terse spec in schema, detailed guidance in skills/docs loaded on demand).
 
 ## Related: embeddings (separate track)
 
@@ -121,5 +159,7 @@ Local commits before this plan was added sit at `6851c02` (pre-plan baseline). D
 - ~~Exact request field for `enabled_toolsets` in the proxy (header vs JSON body extension)?~~ Resolved: JSON body field `cursor_enabled_toolsets` (+ `cursor_tools_allow` / `cursor_tools_deny`), also via `metadata` and env.
 - ~~Can cursor-openai-api filter tools without Hermes upstream changes?~~ Resolved: yes — the proxy filters the inbound `tools` array before serializing, no upstream change required.
 - ~~Token measurement harness?~~ Resolved: `scripts/measure-tool-tokens.ts`. Still want a real tokenizer (currently chars/4) and a captured full-inventory fixture for exact figures.
-- Which tools must remain resident for the Cursor client-mode marker protocol to work reliably?
+- ~~Which tools must remain resident?~~ Partially resolved: the brief signature keeps *every* tool callable, so "resident" is now about routing comfort, not capability. `usage-log` data drives the resident set; default is read_file/write_file/patch/search_files/terminal/delegate_task.
 - Should filtering also apply to the native/`full-prompt` path's `## CLIENT_TOOLS` block, or stay scoped to the client marker inventory?
+- Is the `expand_tools` runtime sub-loop worth building, given brief signatures already make tools callable? Only if models routinely need full per-tool guidance — measure with `usage-log` first.
+- Validate `brief` mode call accuracy against real Composer turns (does name+arg-names suffice, or do some tools need a one-line arg hint)?

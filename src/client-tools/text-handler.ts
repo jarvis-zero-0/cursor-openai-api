@@ -7,6 +7,7 @@ import { chunkFromToolDelta, type StreamState } from "../stream.js";
 import type { TurnPolicy } from "../turn-policy.js";
 import { ClientToolMarkerFilter } from "./marker-parser.js";
 import { toOpenAiToolCalls } from "./openai-map.js";
+import { recordToolUsage } from "./usage-log.js";
 import type { ClientToolSpec, MarkerParserEvent } from "./types.js";
 
 export interface ClientToolTextHandler {
@@ -47,6 +48,7 @@ export function createClientToolTextHandler(
         startIndex: state.toolCalls.size,
       });
       if (!mapped) continue;
+      recordToolUsage(mapped.function.name);
       yield chunkFromToolDelta(
         state,
         mapped.id,
