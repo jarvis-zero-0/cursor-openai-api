@@ -50,6 +50,18 @@ const envSchema = z.object({
   // Comma-separated catalog ids for GET /v1/models. Default: latest curated set.
   // Use "*" to expose the full Cursor catalog (no filter).
   CURSOR_MODEL_ALLOWLIST: z.string().optional(),
+  // Default client-tool filtering (client-mode marker path). Each is a
+  // comma-separated list; per-request fields/metadata override these.
+  // Reduces the injected tool inventory so unused schemas never cost tokens.
+  CURSOR_ENABLED_TOOLSETS: z.string().optional(),
+  CURSOR_TOOL_ALLOWLIST: z.string().optional(),
+  CURSOR_TOOL_DENYLIST: z.string().optional(),
+  // When toolset filtering is active, keep tools with no known toolset.
+  // Defaults to true (fail open) so a stale map never strips a needed tool.
+  CURSOR_TOOLSETS_KEEP_UNMAPPED: z
+    .enum(["true", "false", "1", "0"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true" || v === "1")),
   CURSOR_ENABLE_SESSIONS: z
     .enum(["true", "false", "1", "0"])
     .optional()

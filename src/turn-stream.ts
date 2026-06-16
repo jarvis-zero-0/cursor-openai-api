@@ -6,6 +6,7 @@ import {
 import type { ClientToolTextHandler } from "./client-tools/text-handler.js";
 import { createClientToolTextHandler } from "./client-tools/text-handler.js";
 import { parseClientTools } from "./client-tools/request.js";
+import { filterClientTools } from "./client-tools/filter.js";
 import type { ClientToolSpec } from "./client-tools/types.js";
 import type { ChatCompletionChunk, ChatCompletionRequest } from "./openai.js";
 import type { StreamState } from "./stream.js";
@@ -61,7 +62,7 @@ export function resolveTurnStreamContext(
     };
   }
 
-  const specs = parseClientTools(request.tools);
+  const specs = filterClientTools(parseClientTools(request.tools), request, config);
   return {
     policy,
     clientToolSpecs: specs,

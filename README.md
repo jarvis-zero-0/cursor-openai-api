@@ -38,6 +38,10 @@ npm install
 | `CURSOR_ASSISTANT_TEXT_MODE` | no | `live` | How assistant `content` is streamed when text and thinking interleave: `live`, `final-content`, or `preamble-as-reasoning` (see [Assistant text modes](#assistant-text-modes)) |
 | `CURSOR_EMIT_TOOL_CALLS` | no | `false` | Surface Cursor's internal tool use as OpenAI `tool_calls` (see [Tool calls](#tool-calls) below) |
 | `CURSOR_TOOL_MODE` | no | `auto` | Default tool routing: `auto`, `client` (Hermes marker protocol), or `native` (full Cursor SDK tools). Per-request override: `cursor_tool_mode` (see [Hermes integration](#hermes-integration)) |
+| `CURSOR_ENABLED_TOOLSETS` | no | — | Comma-separated toolset names; only matching client tools are injected into the prompt. Per-request override: `cursor_enabled_toolsets` (see [Tool filtering](#tool-filtering)) |
+| `CURSOR_TOOL_ALLOWLIST` | no | — | Comma-separated tool-name patterns to keep (`*` suffix = prefix match). Per-request override: `cursor_tools_allow` |
+| `CURSOR_TOOL_DENYLIST` | no | — | Comma-separated tool-name patterns to drop (e.g. `browser_*,computer_use,cronjob`). Per-request override: `cursor_tools_deny` |
+| `CURSOR_TOOLSETS_KEEP_UNMAPPED` | no | `true` | When toolset filtering is active, keep tools with no known toolset. Per-request override: `cursor_toolsets_keep_unmapped` |
 | `CURSOR_EMIT_SPEED_ALIASES` | no | `true` | List synthetic `*-slow` / `*-fast` rows on `GET /v1/models` (requests still resolve when `false`) |
 | `CURSOR_MODEL_ALLOWLIST` | no | curated latest set | Comma-separated catalog ids for `GET /v1/models`. Omit for the built-in latest-only list; set `*` for the full Cursor catalog |
 | `CURSOR_ENABLE_SESSIONS` | no | `true` | Reuse Cursor SDK agents when the client supplies a session id |
@@ -389,6 +393,41 @@ Three HTTP-level behaviors:
 **Note:** The SDK may still run Cursor's built-in tools in the workspace when the model ignores the client-tool prompt. The HTTP response only exposes **client** `tool_calls`. If you see unexpected file changes during client tool loops, treat that as a known limitation until a stricter SDK guard exists.
 
 **Identity confusion (Hermes / OpenCode):** When `cursor_tool_mode` is `client` (or `auto` with upstream tools), the proxy injects a marker-protocol directive that overrides tool *invocation* while preserving upstream persona/skills for content. Composer may still claim it is "Cursor IDE" and try native Read/Shell tools — the directive explicitly forbids that. For standalone delegation, pass `cursor_tool_mode: "native"` so the model uses full SDK tooling instead. Restart the proxy after updating `src/client-tools/prompt.ts`.
+
+### Tool filtering
+
+Each client tool ships a prose-heavy JSON schema, and injecting all ~28 Hermes tools into the CLIENT TOOL INVENTORY every turn is the dominant fixed prompt cost on the client path. The proxy can drop tools a turn cannot use **before** they are serialized, with no upstream Hermes change.
+
+Three independent levers, resolvable per request (field), via `metadata` (comma-separated string), or as an env default:
+
+| Lever | Request field | Env default | Meaning |
+|-------|---------------|-------------|---------|
+| Toolsets | `cursor_enabled_toolsets: ["file","terminal"]` | `CURSOR_ENABLED_TOOLSETS` | Keep only tools in these toolsets |
+| Allowlist | `cursor_tools_allow: ["read_file","patch"]` | `CURSOR_TOOL_ALLOWLIST` | Keep only matching tool names |
+| Denylist | `cursor_tools_deny: ["browser_*","cronjob"]` | `CURSOR_TOOL_DENYLIST` | Drop matching tool names (highest priority) |
+
+Patterns are exact, or a trailing `*` for a prefix match. `deny` always wins; `allow` and `toolsets` union. Precedence: request field → `metadata` → env. When toolset filtering is active, tools with no known toolset are kept unless `cursor_toolsets_keep_unmapped` / `CURSOR_TOOLSETS_KEEP_UNMAPPED` is `false` (fail-open so a stale map never strips a needed tool).
+
+```json
+{
+  "model": "composer-2.5",
+  "cursor_tool_mode": "client",
+  "cursor_enabled_toolsets": ["file", "terminal"],
+  "tools": [ ... ]
+}
+```
+
+Toolset names mirror Hermes (`file`, `terminal`, `coding`, `browser`, `delegation`, `cronjob`, `memory`, `session_search`, `skills`, `messaging`, `interaction`, `todo`, `tts`, `computer_use`); the name→toolset map lives in `src/client-tools/toolsets.ts`.
+
+Measure the savings on a representative inventory:
+
+```bash
+bun run scripts/measure-tool-tokens.ts                       # bundled sample
+bun run scripts/measure-tool-tokens.ts --tools captured.json # a real request's tools[]
+bun run scripts/measure-tool-tokens.ts --deny 'browser_*,cronjob' --toolsets file,terminal
+```
+
+> Note: filtering applies to the client-mode marker inventory (`clientToolSpecs`). In client mode the inventory is already serialized **once** (no `tools` array is forwarded to the Cursor SDK), so the lever here is trimming the set, not de-duplicating it.
 
 ## Hermes integration
 

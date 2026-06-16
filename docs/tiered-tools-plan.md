@@ -9,9 +9,10 @@ Tool injection dominates fixed context cost on the Hermes client-mode proxy path
 - Each Hermes tool ships a full JSON Schema where `description` fields are prose manuals (usage guidance, pitfalls, safety rules).
 - Heavy tools alone (`delegate_task`, `cronjob`, `computer_use`, `session_search`) account for several thousand tokens each.
 - All ~28 tools load eagerly every turn, even when the task is conversational.
-- In `cursor_tool_mode=client`, the inventory appears twice: once in the OpenAI `tools` array and again as JSON inside the system prompt for the marker protocol.
 
-Rough estimate: ~8–12K tokens per turn for tool schemas alone; client mode can approach double that.
+Rough estimate: ~8–12K tokens per turn for tool schemas alone.
+
+> **Verified 2026-06-15 (Phase 0):** The earlier "inventory appears twice in client mode" assumption does **not** hold for the current code. `serializeMessagesToPrompt` builds the client path with `skipTools: true`, so the OpenAI `tools` JSON block (`## CLIENT_TOOLS`) is not emitted alongside `CLIENT TOOL INVENTORY`, and `buildSendOptions` forwards no `tools` array to the Cursor SDK. Tools are serialized exactly once. The real lever is therefore **trimming the set** (filtering) and, later, **description verbosity** — not de-duplication.
 
 Embeddings and semantic retrieval do **not** shrink this cost — it is structural. Fixes must target eager injection, duplication, and description verbosity.
 
@@ -55,21 +56,30 @@ One-liners alone are too thin to route well (e.g. knowing `cronjob` requires `sc
 
 ## Implementation phases
 
-### Phase 0 — Proxy overhead (cheapest win, no architecture change)
+### Phase 0 — Proxy overhead (cheapest win, no architecture change) — DONE
 
 Target: cursor-openai-api + per-request toolset filtering.
 
-1. **Eliminate client-mode duplication**
-   - Stop re-serializing the full CLIENT TOOL INVENTORY JSON into the system prompt when the same schemas are already in the OpenAI `tools` array.
-   - Keep marker protocol routing instructions; drop redundant schema blobs.
-   - Measure token savings before/after on a representative Hermes turn.
+1. **Client-mode duplication — verified non-issue.**
+   - Confirmed the client path already serializes the inventory once (`skipTools: true`; no `tools` array forwarded to the SDK). No fix needed; documented in Problem above.
 
-2. **Wire `enabled_toolsets` per request**
-   - Accept toolset restriction from the client (header or request field — TBD).
-   - Filter the injected tool list to only matching toolsets before building prompt + tools array.
-   - Document supported toolset names and defaults.
+2. **Per-request tool filtering — implemented.**
+   - `src/client-tools/toolsets.ts`: static Hermes tool→toolset map (`file`, `terminal`, `coding`, `browser`, `delegation`, `cronjob`, `memory`, `session_search`, `skills`, `messaging`, `interaction`, `todo`, `tts`, `computer_use`).
+   - `src/client-tools/filter.ts`: `resolveToolFilter` + `applyToolFilter` supporting allowlist, denylist, and `enabled_toolsets`, with `*`-suffix prefix matching and a fail-open `keepUnmapped` default.
+   - Resolution precedence: request field → `metadata` → env (`CURSOR_ENABLED_TOOLSETS`, `CURSOR_TOOL_ALLOWLIST`, `CURSOR_TOOL_DENYLIST`, `CURSOR_TOOLSETS_KEEP_UNMAPPED`). Wired into `resolveTurnStreamContext` so the inventory is trimmed before serialization.
+   - `scripts/measure-tool-tokens.ts` + `scripts/fixtures/hermes-tools.sample.json`: chars/4 token estimator with per-toolset breakdown and filter-scenario savings.
+   - Tests: `test/client-tools/filter.test.ts`, `test/turn-stream.test.ts`.
 
-Expected impact: likely halves proxy-path tool cost for typical code-only or file-only sessions.
+Measured impact (bundled representative sample, schemas partially trimmed so absolute numbers are a lower bound; relative savings are real):
+
+| Filter | Result |
+|--------|--------|
+| `deny browser_*,computer_use,cronjob` | −27% |
+| `toolsets=file,terminal,coding` | −64% |
+| `toolsets=file,terminal` (keep unmapped) | −67% |
+| `allow=read_file,write_file,patch,terminal` | −78% |
+
+Next within Phase 0 (optional): trim description verbosity (terse spec in inventory, guidance in skills/docs).
 
 ### Phase 1 — Brief catalog + describe meta-tool
 
@@ -108,7 +118,8 @@ Local commits before this plan was added sit at `6851c02` (pre-plan baseline). D
 
 ## Open questions
 
-- Exact request field for `enabled_toolsets` in the proxy (header vs JSON body extension)?
-- Can cursor-openai-api filter tools without Hermes upstream changes, or is catalog generation server-side only?
+- ~~Exact request field for `enabled_toolsets` in the proxy (header vs JSON body extension)?~~ Resolved: JSON body field `cursor_enabled_toolsets` (+ `cursor_tools_allow` / `cursor_tools_deny`), also via `metadata` and env.
+- ~~Can cursor-openai-api filter tools without Hermes upstream changes?~~ Resolved: yes — the proxy filters the inbound `tools` array before serializing, no upstream change required.
+- ~~Token measurement harness?~~ Resolved: `scripts/measure-tool-tokens.ts`. Still want a real tokenizer (currently chars/4) and a captured full-inventory fixture for exact figures.
 - Which tools must remain resident for the Cursor client-mode marker protocol to work reliably?
-- Token measurement harness: add a dev script that counts prompt tokens for a sample Hermes inventory?
+- Should filtering also apply to the native/`full-prompt` path's `## CLIENT_TOOLS` block, or stay scoped to the client marker inventory?
