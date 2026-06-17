@@ -162,6 +162,15 @@ export class SessionStore {
     await prepared.agent[Symbol.asyncDispose]();
   }
 
+  /**
+   * Drop and dispose a cached agent so the next turn for this key creates a
+   * fresh one. Used to recover from a poisoned agent (lingering active run);
+   * see `isActiveRunError`.
+   */
+  evictSession(sessionKey: string): void {
+    this.cache.invalidate(sessionKey);
+  }
+
   registerTestSession(key: string, entry: SessionRegistration): void {
     this.cache.registerForTests(key, entry);
   }
