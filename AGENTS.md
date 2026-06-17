@@ -91,7 +91,6 @@ src/
 docs/
   subagent-handoff-contract.md
 test/                   # bun test suite
-sandbox/                # Optional isolated workspace for agent experiments
 ```
 
 ## Commands
@@ -130,4 +129,4 @@ See `README.md` for the full env var table.
 
 ## Cursor cloud agents
 
-Clone from GitHub so cloud agents have full project context. Primary remote: `https://github.com/Randomblock1/cursor-openai-api`. Use repo root as workspace; point `CURSOR_CWD` at `sandbox/` for isolated task work if desired.
+Clone from GitHub so cloud agents have full project context. Primary remote: `https://github.com/Randomblock1/cursor-openai-api`. Use repo root as workspace; point `CURSOR_CWD` at `~/code/cursor-sandbox` for isolated task work if desired.
