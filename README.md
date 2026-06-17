@@ -426,7 +426,7 @@ Patterns are exact, or a trailing `*` for a prefix match. `deny` always wins; `a
 }
 ```
 
-Toolset names mirror Hermes (`file`, `terminal`, `coding`, `browser`, `delegation`, `cronjob`, `memory`, `session_search`, `skills`, `messaging`, `interaction`, `todo`, `tts`, `computer_use`); the name→toolset map lives in `src/client-tools/toolsets.ts`.
+Toolset names mirror Hermes (`file`, `terminal`, `coding`, `browser`, `delegation`, `cronjob`, `memory`, `session_search`, `session_title`, `skills`, `messaging`, `interaction`, `todo`, `tts`, `computer_use`); the name→toolset map lives in `src/client-tools/toolsets.ts`.
 
 > Note: filtering trims the set of client tools registered as `customTools`. The kept set is registered **once** per turn, so the lever here is reducing the schema map, not de-duplicating it.
 

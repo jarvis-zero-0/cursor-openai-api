@@ -50,6 +50,7 @@ describe("toolsets", () => {
   test("maps known tools and falls back to other", () => {
     expect(toolsetForTool("read_file")).toBe("file");
     expect(toolsetForTool("browser_click")).toBe("browser");
+    expect(toolsetForTool("session_title")).toBe("session_title");
     expect(toolsetForTool("totally_unknown")).toBe("other");
   });
 

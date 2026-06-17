@@ -42,6 +42,7 @@ export const TOOL_TOOLSETS: Readonly<Record<string, string>> = {
   // memory / recall
   memory: "memory",
   session_search: "session_search",
+  session_title: "session_title",
   // skills
   skill_manage: "skills",
   skill_view: "skills",
