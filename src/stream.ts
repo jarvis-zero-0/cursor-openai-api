@@ -2,9 +2,11 @@ import type { SDKMessage } from "@cursor/sdk";
 import { attachCursorMeta } from "./cursor-meta.js";
 import type { CompletionFinishReason } from "./finish-reason.js";
 import { resolveFinishReason } from "./finish-reason.js";
+import { formatToolProgressLine } from "./native-progress.js";
 import type { ChatCompletionChunk, CursorCompletionMeta, OpenAIUsage } from "./openai.js";
 import { makeCompletionId } from "./openai.js";
 import { normalizeToolArguments } from "./tool-args.js";
+import type { TurnPolicy } from "./turn-policy.js";
 
 export interface StreamState {
   completionId: string;
@@ -227,8 +229,31 @@ export function* chunksFromSdkMessage(
   event: SDKMessage,
   state: StreamState,
   debugStream = false,
+  policy?: TurnPolicy,
 ): Generator<ChatCompletionChunk> {
   mergeCursorMetaFromSdkMessage(state, event);
+
+  // Option (b): narrate native tool activity as reasoning_content. Tool name,
+  // args, status, and RESULT all arrive on this run.stream() channel via
+  // SDKToolUseMessage (`tool_call`), which is otherwise ignored here. This is
+  // the SINGLE narration site for tool lifecycle events — the onDelta path
+  // (interaction-delta.ts) deliberately does not narrate them, so each event
+  // produces exactly one progress line.
+  //
+  // Gated by `nativeProgress` ALONE (forced off in the client tool loop and
+  // when emitCursorTools is on). It is intentionally NOT gated by
+  // `includeThinking`: progress is a separate lever (`cursor_native_progress`)
+  // from the reasoning-suppression lever (`includeThinking`). Caveat: narration
+  // rides `reasoning_content`, so a platform that strips/hides reasoning will
+  // not render progress — that is the accepted opt-out for such platforms.
+  if (event.type === "tool_call" && policy?.nativeProgress) {
+    const line = formatToolProgressLine(event);
+    if (line) {
+      const chunk = chunkFromReasoningText(state, line);
+      if (chunk) yield chunk;
+    }
+    return;
+  }
 
   if (debugStream && event.type === "status") {
     const meta = `${event.status}${event.message ? `: ${event.message}` : ""}`;

@@ -20,7 +20,7 @@ const baseConfig = {
 } satisfies AppConfig;
 
 describe("resolveTurnPolicy", () => {
-  test("client tool loop keeps assistant text mode from config", () => {
+  test("client tools bridged as customTools keep assistant text mode from config", () => {
     const request = {
       messages: [{ role: "user", content: "hi" }],
       tools: [
@@ -32,7 +32,7 @@ describe("resolveTurnPolicy", () => {
     } satisfies ChatCompletionRequest;
 
     const policy = resolveTurnPolicy(request, baseConfig);
-    expect(policy.clientToolLoop).toBe(true);
+    expect(policy.clientTools).toBe(true);
     expect(policy.emitCursorTools).toBe(false);
     expect(policy.assistantTextMode).toBe("live");
   });
@@ -48,14 +48,14 @@ describe("resolveTurnPolicy", () => {
     );
   });
 
-  test("tool_choice none disables client tool loop", () => {
+  test("tool_choice none disables client tools", () => {
     const request = {
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "echo" } }],
       tool_choice: "none",
     } satisfies ChatCompletionRequest;
 
-    expect(resolveTurnPolicy(request, baseConfig).clientToolLoop).toBe(false);
+    expect(resolveTurnPolicy(request, baseConfig).clientTools).toBe(false);
   });
 
   test("emitCursorTools follows config when no client tools", () => {
@@ -65,10 +65,10 @@ describe("resolveTurnPolicy", () => {
 
     const policy = resolveTurnPolicy(request, baseConfig);
     expect(policy.emitCursorTools).toBe(true);
-    expect(policy.clientToolLoop).toBe(false);
+    expect(policy.clientTools).toBe(false);
   });
 
-  test("native tool mode disables client tool loop", () => {
+  test("native tool mode disables client tools", () => {
     const request = {
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "echo" } }],
@@ -77,7 +77,111 @@ describe("resolveTurnPolicy", () => {
 
     const policy = resolveTurnPolicy(request, baseConfig);
     expect(policy.toolMode).toBe("native");
-    expect(policy.clientToolLoop).toBe(false);
+    expect(policy.clientTools).toBe(false);
+    expect(policy.emitCursorTools).toBe(true);
+  });
+
+  test("nativeProgress defaults on for native turns (no emit, no explicit flag)", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_tool_mode: "native",
+      cursor_emit_tool_calls: false,
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.toolMode).toBe("native");
+    expect(policy.nativeProgress).toBe(true);
+  });
+
+  test("nativeProgress stays off for non-native turns by default", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_emit_tool_calls: false,
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.toolMode).not.toBe("native");
+    expect(policy.nativeProgress).toBe(false);
+  });
+
+  test("emitCursorTools forces nativeProgress off even on native turns", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_tool_mode: "native",
+      cursor_emit_tool_calls: true,
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.emitCursorTools).toBe(true);
+    expect(policy.nativeProgress).toBe(false);
+  });
+
+  test("per-request cursor_native_progress overrides the native default", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_tool_mode: "native",
+      cursor_emit_tool_calls: false,
+      cursor_native_progress: false,
+    } satisfies ChatCompletionRequest;
+
+    expect(resolveTurnPolicy(request, baseConfig).nativeProgress).toBe(false);
+  });
+
+  test("per-request cursor_native_progress can force on for non-native turns", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_emit_tool_calls: false,
+      cursor_native_progress: true,
+    } satisfies ChatCompletionRequest;
+
+    expect(resolveTurnPolicy(request, baseConfig).nativeProgress).toBe(true);
+  });
+
+  const withTools = {
+    messages: [{ role: "user", content: "hi" }],
+    tools: [
+      {
+        type: "function",
+        function: { name: "echo", parameters: { type: "object", properties: {} } },
+      },
+    ],
+  } satisfies ChatCompletionRequest;
+
+  test("client mode bridges client tools as native customTools", () => {
+    const request = {
+      ...withTools,
+      cursor_tool_mode: "client",
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.toolMode).toBe("client");
+    expect(policy.clientTools).toBe(true);
+    // emitCursorTools forced off even though baseConfig enables it, so the
+    // bridge mapping owns the single tool_calls channel.
+    expect(policy.emitCursorTools).toBe(false);
+    expect(policy.nativeProgress).toBe(false);
+  });
+
+  test("auto mode with client tools bridges them as customTools", () => {
+    const request = {
+      ...withTools,
+      cursor_tool_mode: "auto",
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.toolMode).toBe("auto");
+    expect(policy.clientTools).toBe(true);
+    expect(policy.emitCursorTools).toBe(false);
+  });
+
+  test("client mode with no client tools does nothing special", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      cursor_tool_mode: "client",
+    } satisfies ChatCompletionRequest;
+
+    const policy = resolveTurnPolicy(request, baseConfig);
+    expect(policy.clientTools).toBe(false);
     expect(policy.emitCursorTools).toBe(true);
   });
 });

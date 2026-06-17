@@ -34,6 +34,16 @@ const envSchema = z.object({
     .enum(["true", "false", "1", "0"])
     .optional()
     .transform((v) => v === "true" || v === "1"),
+  // Narrate a native worker's tool starts/results as reasoning_content
+  // ("→ read(...)" / "✓ read → ...") so a downstream consumer can see live
+  // progress. When unset, defaults ON for native turns and OFF for client/auto
+  // turns (see resolveNativeProgress in turn-policy.ts); set explicitly to force
+  // either way. Never active in the client tool loop or when emitCursorTools is
+  // on. See stream.ts / interaction-delta.ts.
+  CURSOR_NATIVE_PROGRESS: z
+    .enum(["true", "false", "1", "0"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true" || v === "1")),
   CURSOR_TOOL_MODE: z
     .enum(CURSOR_TOOL_MODES)
     .optional()

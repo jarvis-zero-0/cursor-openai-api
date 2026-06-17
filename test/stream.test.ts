@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { SDKAssistantMessage, SDKThinkingMessage } from "@cursor/sdk";
+import type {
+  SDKAssistantMessage,
+  SDKThinkingMessage,
+  SDKToolUseMessage,
+} from "@cursor/sdk";
 import {
   chunkFromAssistantText,
   chunkFromReasoningText,
@@ -8,6 +12,30 @@ import {
   chunksFromSdkMessage,
   finishChunk,
 } from "../src/stream.js";
+import type { TurnPolicy } from "../src/turn-policy.js";
+
+function policy(overrides: Partial<TurnPolicy> = {}): TurnPolicy {
+  return {
+    includeThinking: true,
+    emitCursorTools: false,
+    nativeProgress: false,
+    clientTools: false,
+    toolMode: "native",
+    debugStream: false,
+    assistantTextMode: "live",
+    ...overrides,
+  };
+}
+
+const runningToolCall: SDKToolUseMessage = {
+  type: "tool_call",
+  agent_id: "a1",
+  run_id: "r1",
+  call_id: "c1",
+  name: "read",
+  status: "running",
+  args: { path: "a.ts" },
+};
 
 describe("stream adapter", () => {
   test("maps assistant text to content delta", () => {
@@ -114,6 +142,77 @@ describe("stream adapter", () => {
     const state = createStreamState("composer-2", { agentId: "a1" });
     const done = finishChunk(state);
     expect(done.cursor?.agent_id).toBe("a1");
+  });
+
+  test("narrates native tool_call as reasoning when nativeProgress is on", () => {
+    const state = createStreamState("composer-2");
+    const chunks = [
+      ...chunksFromSdkMessage(
+        runningToolCall,
+        state,
+        false,
+        policy({ nativeProgress: true }),
+      ),
+    ];
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices[0]?.delta.reasoning_content).toBe(
+      "→ read(a.ts)\n",
+    );
+  });
+
+  test("narrates tool_call even when includeThinking is false (decoupled lever)", () => {
+    const state = createStreamState("composer-2");
+    const chunks = [
+      ...chunksFromSdkMessage(
+        runningToolCall,
+        state,
+        false,
+        policy({ nativeProgress: true, includeThinking: false }),
+      ),
+    ];
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices[0]?.delta.reasoning_content).toBe(
+      "→ read(a.ts)\n",
+    );
+  });
+
+  test("does not narrate tool_call when nativeProgress is off", () => {
+    const state = createStreamState("composer-2");
+    const chunks = [
+      ...chunksFromSdkMessage(
+        runningToolCall,
+        state,
+        false,
+        policy({ nativeProgress: false }),
+      ),
+    ];
+    expect(chunks).toHaveLength(0);
+    expect(state.reasoningText).toBe("");
+  });
+
+  test("narrates completed shell tool_call result stdout", () => {
+    const state = createStreamState("composer-2");
+    const completed: SDKToolUseMessage = {
+      type: "tool_call",
+      agent_id: "a1",
+      run_id: "r1",
+      call_id: "c1",
+      name: "shell",
+      status: "completed",
+      args: { command: "ls" },
+      result: { status: "success", value: { stdout: "file-a\nfile-b" } },
+    };
+    const chunks = [
+      ...chunksFromSdkMessage(
+        completed,
+        state,
+        false,
+        policy({ nativeProgress: true }),
+      ),
+    ];
+    expect(chunks[0]?.choices[0]?.delta.reasoning_content).toBe(
+      "✓ shell → file-a file-b\n",
+    );
   });
 
   test("maps system message to cursor actual_model metadata", () => {

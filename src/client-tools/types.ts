@@ -9,6 +9,19 @@ export interface ParsedToolCall {
   arguments: Record<string, unknown>;
 }
 
-export type MarkerParserEvent =
-  | { type: "text"; text: string }
-  | { type: "tool_call"; toolCall: ParsedToolCall };
+// Subagent handoff contract types — re-exported here so callers have a single
+// import site alongside ClientToolSpec / ParsedToolCall.
+export type {
+  Handoff,
+  HandoffArtifact,
+  HandoffUnresolved,
+  HandoffRecommendation,
+  HandoffMetrics,
+  HandoffVerify,
+  HandoffStatus,
+  HandoffArtifactKind,
+  HandoffVerifyMethod,
+  HandoffSeverity,
+  HandoffToolMode,
+  HandoffParseResult,
+} from "./handoff.js";

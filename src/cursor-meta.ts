@@ -1,4 +1,5 @@
 import type { StreamState } from "./stream.js";
+import type { Handoff } from "./client-tools/handoff.js";
 import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
@@ -59,6 +60,10 @@ export class CursorMetaAccumulator {
 
   setSessionId(sessionId: string): void {
     this.base.session_id = sessionId;
+  }
+
+  setHandoff(handoff: Handoff): void {
+    this.base.handoff = handoff;
   }
 
   snapshot(): CursorCompletionMeta {

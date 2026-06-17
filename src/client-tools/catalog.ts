@@ -22,7 +22,15 @@ import type { ClientToolSpec } from "./types.js";
 export const TOOL_TIER_MODES = ["full", "tiered", "brief"] as const;
 export type ToolTierMode = (typeof TOOL_TIER_MODES)[number];
 
+// Baseline rendering when no tier is otherwise resolved (used by prompt.ts's
+// FULL_TIER fallback): keep every schema. Kept `full` so a direct call with no
+// tier still renders full schemas.
 export const DEFAULT_TOOL_TIER_MODE: ToolTierMode = "full";
+
+// Default tier for the client orchestrator path when the request/env are silent.
+// `tiered` keeps the high-frequency resident tools' full schemas and renders the
+// long tail as compact signatures, cutting the injected inventory's token cost.
+export const DEFAULT_ORCHESTRATOR_TOOL_TIER_MODE: ToolTierMode = "tiered";
 
 /**
  * High-frequency tools that stay resident (full schema) in `tiered` mode. These
@@ -63,7 +71,7 @@ export function resolveToolTier(
     request.cursor_tool_tier ??
     parseTierMode(request.metadata?.["cursor_tool_tier"]) ??
     config.CURSOR_TOOL_TIER ??
-    DEFAULT_TOOL_TIER_MODE;
+    DEFAULT_ORCHESTRATOR_TOOL_TIER_MODE;
 
   const resident =
     parseList(request.cursor_tool_resident) ??
@@ -110,6 +118,33 @@ export function briefToolLine(spec: ClientToolSpec): string {
   const signature = toolSignature(spec);
   const summary = spec.description ? firstSentence(spec.description) : "";
   return summary ? `${signature} — ${summary}` : signature;
+}
+
+/**
+ * Minimal JSON Schema for a long-tail (brief-tier) tool registered on the
+ * native `customTools` channel: the argument NAMES only (and which are
+ * required), with no per-property prose/types/enums. The executor (Hermes)
+ * still holds the real schema and validates on execution, so the model needs
+ * only the arg names to emit a correct native call — this is the native-channel
+ * analog of `briefToolLine` for the prompt inventory. Returns a plain JSON
+ * object (the bridge casts it to the SDK's `SDKJsonValue` record).
+ */
+export function terseInputSchema(spec: ClientToolSpec): Record<string, unknown> {
+  const params = isRecord(spec.parameters) ? spec.parameters : undefined;
+  const properties = isRecord(params?.properties) ? params.properties : undefined;
+  const schema: Record<string, unknown> = { type: "object" };
+  if (properties) {
+    const terseProps: Record<string, unknown> = {};
+    for (const key of Object.keys(properties)) terseProps[key] = {};
+    schema.properties = terseProps;
+    const required = Array.isArray(params?.required)
+      ? (params.required as unknown[]).filter(
+          (v): v is string => typeof v === "string",
+        )
+      : [];
+    if (required.length > 0) schema.required = required;
+  }
+  return schema;
 }
 
 export interface ToolTierSplit {

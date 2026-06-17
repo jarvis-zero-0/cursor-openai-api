@@ -49,4 +49,31 @@ describe("resolveTurnStreamContext tool filtering", () => {
       "browser_navigate",
     ]);
   });
+
+  test("client mode populates client tool specs (for the customTools build)", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [fn("read_file"), fn("terminal")],
+      cursor_tool_mode: "client",
+    } satisfies ChatCompletionRequest;
+
+    const ctx = resolveTurnStreamContext(request, baseConfig);
+    expect(ctx.policy.clientTools).toBe(true);
+    expect(ctx.clientToolSpecs?.map((s) => s.name)).toEqual([
+      "read_file",
+      "terminal",
+    ]);
+  });
+
+  test("native mode does not populate client tool specs", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [fn("read_file"), fn("terminal")],
+      cursor_tool_mode: "native",
+    } satisfies ChatCompletionRequest;
+
+    const ctx = resolveTurnStreamContext(request, baseConfig);
+    expect(ctx.policy.clientTools).toBe(false);
+    expect(ctx.clientToolSpecs).toBeUndefined();
+  });
 });

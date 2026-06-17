@@ -25,7 +25,7 @@ export function parseToolChoice(toolChoice: unknown): ParsedToolChoice | undefin
   return undefined;
 }
 
-export function isClientToolLoop(request: ChatCompletionRequest): boolean {
+export function hasClientTools(request: ChatCompletionRequest): boolean {
   if (request.tool_choice === "none") return false;
   const tools = request.tools;
   return Array.isArray(tools) && tools.length > 0;

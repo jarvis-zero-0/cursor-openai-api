@@ -9,7 +9,8 @@ const withThinking: TurnStreamContext = {
   policy: {
     includeThinking: true,
     emitCursorTools: false,
-    clientToolLoop: false,
+    nativeProgress: false,
+    clientTools: false,
     debugStream: false,
     assistantTextMode: "live",
   },

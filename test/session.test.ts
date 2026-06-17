@@ -285,6 +285,142 @@ describe("cwd-aware session reuse", () => {
   });
 });
 
+describe("session flow integrity (three-plane: orchestrator <-> leaf)", () => {
+  // A delegated native leaf always carries its OWN hermes_session_id (the child
+  // Hermes agent's session_id), distinct from the orchestrator's. These tests
+  // lock in that a distinct session key can never reuse or dispose the
+  // orchestrator's cached agent, that a stable key reuses one agent across a
+  // multi-turn loop, and (the hazard distinct keys avoid) that a SHARED key with
+  // divergent history destroys + recreates the cached agent.
+  const parentHistory = [
+    { role: "user" as const, content: "orchestrator turn 1" },
+    { role: "assistant" as const, content: "orchestrator reply 1" },
+  ];
+
+  test("a delegated child (distinct key) does not reuse or dispose the orchestrator's agent", async () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("hermes:parent-1", {
+      agent: { agentId: "agent-orchestrator" } as SDKAgent,
+      agentId: "agent-orchestrator",
+      modelId: "composer-2.5",
+      cwd: "/ws/symbiosis",
+      messageCount: 2,
+      messagesSnapshot: parentHistory,
+      lastAccess: Date.now(),
+    });
+
+    let created = false;
+    // Child: distinct hermes_session_id, fresh task messages, SAME cwd — proving
+    // the key alone isolates the leaf even when the workspace is identical.
+    const prepared = await localStore.prepareChatSession(
+      async () => {
+        created = true;
+        return { agentId: "agent-leaf" } as SDKAgent;
+      },
+      {
+        messages: [{ role: "user", content: "delegated subtask" }],
+        metadata: { hermes_session_id: "child-1" },
+      },
+      "composer-2.5",
+      baseConfig,
+      undefined,
+      undefined,
+      "/ws/symbiosis",
+    );
+
+    expect(created).toBe(true);
+    expect(prepared.agentId).toBe("agent-leaf");
+    expect(prepared.isNewAgent).toBe(true);
+
+    // The orchestrator's cached agent must survive the child turn untouched.
+    const stillCached = localStore
+      .listActiveSessions()
+      .find((s) => s.session_id === "hermes:parent-1");
+    expect(stillCached?.agent_id).toBe("agent-orchestrator");
+
+    localStore.clearForTests();
+  });
+
+  test("a stable keyed session reuses one agent across a multi-turn loop", async () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("hermes:loop-1", {
+      agent: { agentId: "agent-loop" } as SDKAgent,
+      agentId: "agent-loop",
+      modelId: "composer-2.5",
+      cwd: "/ws/symbiosis",
+      messageCount: 2,
+      messagesSnapshot: parentHistory,
+      lastAccess: Date.now(),
+    });
+
+    const followUp = [
+      ...parentHistory,
+      { role: "user" as const, content: "marker round-trip 2" },
+    ];
+
+    const prepared = await localStore.prepareChatSession(
+      async () => {
+        throw new Error("should reuse the keyed agent across the loop, not create");
+      },
+      { messages: followUp, metadata: { hermes_session_id: "loop-1" } },
+      "composer-2.5",
+      baseConfig,
+      undefined,
+      undefined,
+      "/ws/symbiosis",
+    );
+
+    expect(prepared.agentId).toBe("agent-loop");
+    expect(prepared.isNewAgent).toBe(false);
+    expect(prepared.deltaMessages).toEqual([
+      { role: "user", content: "marker round-trip 2" },
+    ]);
+
+    localStore.clearForTests();
+  });
+
+  test("a SHARED key with divergent (non-prefix) history disposes + recreates — why child keys must differ", async () => {
+    const localStore = new SessionStore();
+    localStore.registerTestSession("hermes:shared", {
+      agent: { agentId: "agent-victim" } as SDKAgent,
+      agentId: "agent-victim",
+      modelId: "composer-2.5",
+      cwd: "/ws/symbiosis",
+      messageCount: 2,
+      messagesSnapshot: parentHistory,
+      lastAccess: Date.now(),
+    });
+
+    let created = false;
+    const prepared = await localStore.prepareChatSession(
+      async () => {
+        created = true;
+        return { agentId: "agent-replacement" } as SDKAgent;
+      },
+      {
+        // Divergent first message: does not prefix-match the cached snapshot.
+        messages: [{ role: "user", content: "totally different conversation" }],
+        metadata: { hermes_session_id: "shared" },
+      },
+      "composer-2.5",
+      baseConfig,
+      undefined,
+      undefined,
+      "/ws/symbiosis",
+    );
+
+    expect(created).toBe(true);
+    expect(prepared.agentId).toBe("agent-replacement");
+    expect(prepared.isNewAgent).toBe(true);
+    // The original agent's entry was invalidated by the prefix mismatch.
+    expect(
+      localStore.listActiveSessions().some((s) => s.agent_id === "agent-victim"),
+    ).toBe(false);
+
+    localStore.clearForTests();
+  });
+});
+
 describe("session config", () => {
   test("baseConfig enables sessions by default", () => {
     expect(baseConfig.CURSOR_ENABLE_SESSIONS).toBe(true);

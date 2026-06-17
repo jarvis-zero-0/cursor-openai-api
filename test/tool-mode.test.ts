@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../src/config.js";
 import type { ChatCompletionRequest } from "../src/openai.js";
 import {
-  resolveClientToolLoopEnabled,
+  resolveClientToolsEnabled,
   resolveCursorToolMode,
 } from "../src/tool-mode.js";
 
@@ -46,30 +46,48 @@ describe("resolveCursorToolMode", () => {
     } satisfies ChatCompletionRequest;
     expect(resolveCursorToolMode(request, baseConfig)).toBe("client");
   });
+
+  test("client-native is no longer a recognized mode value (falls back to config)", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      metadata: { cursor_tool_mode: "client-native" },
+    } satisfies ChatCompletionRequest;
+    // Unrecognized metadata value is ignored; resolution falls back to config default.
+    expect(resolveCursorToolMode(request, baseConfig)).toBe("auto");
+  });
 });
 
-describe("resolveClientToolLoopEnabled", () => {
+describe("resolveClientToolsEnabled", () => {
   const withTools = {
     messages: [{ role: "user", content: "hi" }],
     tools: [{ type: "function", function: { name: "read_file" } }],
   } satisfies ChatCompletionRequest;
 
-  test("auto enables loop when tools are present", () => {
-    expect(resolveClientToolLoopEnabled(withTools, "auto")).toBe(true);
+  test("auto enables client tools when tools are present", () => {
+    expect(resolveClientToolsEnabled(withTools, "auto")).toBe(true);
   });
 
-  test("client enables loop when tools are present", () => {
-    expect(resolveClientToolLoopEnabled(withTools, "client")).toBe(true);
+  test("client enables client tools when tools are present", () => {
+    expect(resolveClientToolsEnabled(withTools, "client")).toBe(true);
   });
 
-  test("native disables loop even when tools are present", () => {
-    expect(resolveClientToolLoopEnabled(withTools, "native")).toBe(false);
+  test("native disables client tools even when tools are present", () => {
+    expect(resolveClientToolsEnabled(withTools, "native")).toBe(false);
   });
 
   test("client without tools stays disabled", () => {
     const request = {
       messages: [{ role: "user", content: "hi" }],
     } satisfies ChatCompletionRequest;
-    expect(resolveClientToolLoopEnabled(request, "client")).toBe(false);
+    expect(resolveClientToolsEnabled(request, "client")).toBe(false);
+  });
+
+  test("tool_choice none disables client tools", () => {
+    const request = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "read_file" } }],
+      tool_choice: "none",
+    } satisfies ChatCompletionRequest;
+    expect(resolveClientToolsEnabled(request, "client")).toBe(false);
   });
 });

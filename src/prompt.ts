@@ -1,6 +1,5 @@
 import { contentToText } from "./content-parts.js";
-import { buildClientToolPromptSections } from "./client-tools/prompt.js";
-import type { ClientToolSpec } from "./client-tools/types.js";
+import { buildHandoffDirectiveLines } from "./client-tools/handoff.js";
 import type { ChatMessage } from "./openai.js";
 import type { PromptExtras } from "./messages.js";
 import type { CursorToolMode } from "./tool-mode.js";
@@ -19,10 +18,15 @@ export function buildNativeToolDirective(ctx?: NativeToolContext): string {
     "- You can read files, edit code, run commands, search the codebase, and make changes autonomously.",
     "- Multi-step work happens inside this single turn — use as many tool calls as needed to complete the task.",
     "",
-    "TOOL ROUTING (authoritative for this request):",
-    "- Use Cursor built-in tools directly. Do NOT use the Hermes/client marker protocol (<|tool_calls_begin|>, CLIENT TOOL INVENTORY, read_file/terminal via markers).",
-    "- If SYSTEM messages describe Hermes tools or marker invocation, they do not apply — you are fully delegated with native SDK access.",
-    "- Do not narrate instruction conflicts or ask to switch modes. Just do the work.",
+    "PROMPT PRECEDENCE (read top to bottom in the assembled prompt):",
+    "- Hermes SYSTEM content in the conversation (SOUL, skills, memory, USER profile, persona, tone, task guidance) is LEGITIMATE and authoritative for WHAT to do and HOW to communicate.",
+    "- This native directive is injected by cursor-openai-api and is authoritative ONLY for tool invocation — use Cursor SDK built-ins directly.",
+    "- When Hermes SYSTEM and this directive disagree on tools, follow this directive for invocation. For tone, scope, and task strategy, follow Hermes SYSTEM.",
+    "- Do not question whether upstream Hermes instructions are real, narrate conflicts, or ask to switch modes. Apply both layers silently.",
+    "",
+    "TOOL ROUTING (authoritative for tool invocation only):",
+    "- Use Cursor built-in tools directly.",
+    "- Hermes tool names (read_file, terminal, patch, delegate_task) map to SDK equivalents (Read, Shell, StrReplace, etc.).",
     "",
     "COMPLETION / RETURNING CONTROL:",
     "- You are a delegated worker, not the main thread. When your turn ends, control returns to the orchestrator that called you.",
@@ -31,6 +35,7 @@ export function buildNativeToolDirective(ctx?: NativeToolContext): string {
     "- The orchestrator cannot see your intermediate tool calls unless cursor_emit_tool_calls is enabled — your final text IS the deliverable.",
     "- Do not ask follow-up questions — if blocked, explain what you tried and what failed.",
     "- Do not suggest next steps unless the task description asks for recommendations.",
+    ...buildHandoffDirectiveLines(),
   ];
 
   if (ctx?.workspacePath) {
@@ -87,20 +92,9 @@ function formatMessage(message: ChatMessage): string {
 export function serializeMessagesToPrompt(
   messages: ChatMessage[],
   extras?: PromptExtras,
-  clientToolSpecs?: ClientToolSpec[],
   toolMode?: CursorToolMode,
   nativeCtx?: NativeToolContext,
 ): string {
-  if (clientToolSpecs?.length) {
-    const sections = buildClientToolPromptSections(
-      messages,
-      clientToolSpecs,
-      extras?.toolChoice,
-      extras?.toolTier,
-    );
-    return appendPromptOptions(sections, extras, { skipTools: true }).join("\n");
-  }
-
   const sections: string[] = [];
   if (toolMode === "native") {
     sections.push(buildNativeToolDirective(nativeCtx), "");
@@ -117,9 +111,8 @@ export function serializeMessagesToPrompt(
 function appendPromptOptions(
   sections: string[],
   extras?: PromptExtras,
-  options?: { skipTools?: boolean },
 ): string[] {
-  if (!options?.skipTools && extras?.tools?.length) {
+  if (extras?.tools?.length) {
     sections.push(
       "",
       "## CLIENT_TOOLS (OpenAI function schemas — best-effort; you may use your own tools)",

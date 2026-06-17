@@ -1,6 +1,11 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { loadDotEnv } from "./load-env.js";
+
+// Bridge `.env` into process.env before parsing config — launchd runs
+// `node dist/index.js`, which does not auto-load `.env`. process.env wins.
+loadDotEnv();
 
 const config = loadConfig();
 const app = createApp(config);

@@ -37,12 +37,13 @@ npm install
 | `CURSOR_INCLUDE_THINKING` | no | `true` | Stream thinking as `reasoning_content` / `reasoning` on deltas and the final message |
 | `CURSOR_ASSISTANT_TEXT_MODE` | no | `live` | How assistant `content` is streamed when text and thinking interleave: `live`, `final-content`, or `preamble-as-reasoning` (see [Assistant text modes](#assistant-text-modes)) |
 | `CURSOR_EMIT_TOOL_CALLS` | no | `false` | Surface Cursor's internal tool use as OpenAI `tool_calls` (see [Tool calls](#tool-calls) below) |
-| `CURSOR_TOOL_MODE` | no | `auto` | Default tool routing: `auto`, `client` (Hermes marker protocol), or `native` (full Cursor SDK tools). Per-request override: `cursor_tool_mode` (see [Hermes integration](#hermes-integration)) |
-| `CURSOR_ENABLED_TOOLSETS` | no | — | Comma-separated toolset names; only matching client tools are injected into the prompt. Per-request override: `cursor_enabled_toolsets` (see [Tool filtering](#tool-filtering)) |
+| `CURSOR_NATIVE_PROGRESS` | no | on for `native`, off otherwise | Narrate a native worker's tool starts/results (and live shell stdout) as `reasoning_content` (`→ read(...)` / `✓ read → ...`). Unset = default-on for `native` turns, off for `client`/`auto`. Independent of `CURSOR_INCLUDE_THINKING`. Per-request override: `cursor_native_progress`. Forced off in the client loop and when `cursor_emit_tool_calls` is on |
+| `CURSOR_TOOL_MODE` | no | `auto` | Default tool routing: `auto`, `client` (client tools registered as native SDK `customTools`, calls captured as OpenAI `tool_calls`), or `native` (full Cursor SDK tools, the default worker path). Per-request override: `cursor_tool_mode` (see [Hermes integration](#hermes-integration)) |
+| `CURSOR_ENABLED_TOOLSETS` | no | — | Comma-separated toolset names; only matching client tools are registered as `customTools`. Per-request override: `cursor_enabled_toolsets` (see [Tool filtering](#tool-filtering)) |
 | `CURSOR_TOOL_ALLOWLIST` | no | — | Comma-separated tool-name patterns to keep (`*` suffix = prefix match). Per-request override: `cursor_tools_allow` |
 | `CURSOR_TOOL_DENYLIST` | no | — | Comma-separated tool-name patterns to drop (e.g. `browser_*,computer_use,cronjob`). Per-request override: `cursor_tools_deny` |
 | `CURSOR_TOOLSETS_KEEP_UNMAPPED` | no | `true` | When toolset filtering is active, keep tools with no known toolset. Per-request override: `cursor_toolsets_keep_unmapped` |
-| `CURSOR_TOOL_TIER` | no | `full` | Progressive disclosure of the client inventory: `full`, `tiered`, or `brief` (see [Tool tiers](#tool-tiers-progressive-disclosure)). Per-request override: `cursor_tool_tier` |
+| `CURSOR_TOOL_TIER` | no | `tiered` | Progressive disclosure of the native `customTool` schemas: `full`, `tiered`, or `brief` (see [Tool tiers](#tool-tiers-progressive-disclosure)). The client orchestrator defaults to `tiered` to cut prompt cost. Per-request override: `cursor_tool_tier` |
 | `CURSOR_TOOL_RESIDENT` | no | curated set | Comma-separated tool names kept at full schema in `tiered` mode. Per-request override: `cursor_tool_resident` |
 | `CURSOR_TOOL_USAGE_LOG` | no | — | Path to append a JSONL record of every client tool call, for tuning tiers |
 | `CURSOR_EMIT_SPEED_ALIASES` | no | `true` | List synthetic `*-slow` / `*-fast` rows on `GET /v1/models` (requests still resolve when `false`) |
@@ -78,6 +79,8 @@ npm run dev:node
 ```
 
 The server source uses Node-compatible APIs (`process.env`, `@hono/node-server`) and no `Bun.*` runtime APIs. Bun runs TypeScript directly; the Node scripts compile with `tsc` or use `tsx` for watch mode.
+
+> **Native streaming turns require Node, not Bun.** Bun is fine for install, tests, and non-streaming use, but `cursor_tool_mode: "native"` turns drive the `@cursor/sdk` agent over its gRPC/HTTP2 transport, which crashes Bun with `NGHTTP2_FRAME_SIZE_ERROR` mid-stream. Run the server under Node (`npm run start:node` or `npm run dev:node`) whenever native execution is the primary path (the Hermes-delegated worker case). Re-probe under Bun when bumping `@cursor/sdk`; drop this note if a release fixes the transport.
 
 ## Usage
 
@@ -117,7 +120,8 @@ By default, `GET /v1/models` exposes only the latest Cursor catalog skus (legacy
 
 | Model id | Notes |
 |----------|-------|
-| `composer-2.5` | Default; fast tier |
+| `default` | Cursor "Auto" — server picks the best model per request (at worst Composer 2.5). Alias: `auto` |
+| `composer-2.5` | Fast tier |
 | `composer-2.5-slow` | Standard (non-fast) tier — cheaper |
 | `composer-2.5-fast` | Explicit fast alias |
 | `claude-opus-4-8` | |
@@ -270,7 +274,7 @@ export CURSOR_ASSISTANT_TEXT_MODE=preamble-as-reasoning
 export CURSOR_EMIT_TOOL_CALLS=false
 ```
 
-Client tool loop (OpenCode's own `tools` array) uses the **same** assistant text mode for visible text parsed from the stream — set `preamble-as-reasoning` there too if you want ordering fixes during tool turns.
+Client tool turns (OpenCode's own `tools` array, registered as native `customTools`) use the **same** assistant text mode for visible text from the stream — set `preamble-as-reasoning` there too if you want ordering fixes during tool turns.
 
 ### Recommended setup
 
@@ -316,7 +320,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 | Stream | When it updates |
 |--------|-----------------|
 | Thinking (`reasoning_content`) | Live — includes preamble text re-routed when the model goes back to thinking or reaches a tool-call boundary |
-| Tool calls (`CURSOR_EMIT_TOOL_CALLS=true` or client tool loop) | Live |
+| Tool calls (`CURSOR_EMIT_TOOL_CALLS=true` or client tools) | Live |
 | Assistant response (`content`) | **Once**, when the turn ends (final text segment only) |
 
 ### Choosing a mode by app
@@ -351,7 +355,7 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 - **Cursor metadata**: Chat completion responses and chat stream chunks include `cursor` with `agent_id`, `run_id`, `session_id`, and when available `request_id`, `actual_model`, `thinking_duration_ms`, `cache_write_tokens`. All endpoints also return available `X-Cursor-*` headers for agent, run, session, request, and actual model ids.
 - **Multimodal**: User messages with `image_url` / data URLs are sent as `SDKUserMessage` with `images` when possible (not only `[image: …]` text).
 - **Streaming**: Text, thinking, and tool deltas come from `onDelta` (`text-delta`, `thinking-delta`, tool events). `run.stream()` only updates Cursor metadata (`actual_model`, `request_id`, `thinking_duration_ms`) and optional `DEBUG_STREAM` status lines; duplicate thinking messages from `run.stream()` are intentionally ignored.
-- **Assistant text modes**: `CURSOR_ASSISTANT_TEXT_MODE` / `cursor_assistant_text_mode` control `live`, `final-content`, and `preamble-as-reasoning` routing. Applies to SDK text deltas and client tool loop visible text. See [Assistant text modes](#assistant-text-modes) and [OpenCode](#opencode).
+- **Assistant text modes**: `CURSOR_ASSISTANT_TEXT_MODE` / `cursor_assistant_text_mode` control `live`, `final-content`, and `preamble-as-reasoning` routing. Applies to SDK text deltas and client-tool turn visible text. See [Assistant text modes](#assistant-text-modes) and [OpenCode](#opencode).
 - **Client abort**: Dropping the HTTP request aborts the in-flight run via `run.cancel()` when supported.
 - **Model parameters**: Pass Cursor SDK params via `cursor_model_params` (`[{ "id", "value" }]`). Chat completions also accept the convenience alias `reasoning_effort`; Responses requests use `reasoning.effort`. These aliases map only when the model catalog defines a thinking-effort param. Explicit `cursor_model_params` win on duplicate ids.
 - **Fast mode**: Composer defaults to `fast=true` in Cursor's catalog; disable with `cursor_model_params: [{ "id": "fast", "value": "false" }]` or model id `composer-2.5-slow`. Use `*-fast` / `*-slow` proxy aliases for any model that advertises both `fast` param values (see [Speed aliases](#speed-aliases--slow--fast)).
@@ -359,13 +363,15 @@ Per-request overrides: `cursor_include_thinking`, `cursor_assistant_text_mode`, 
 
 ### Tool calls
 
-Three routing modes, controlled by `cursor_tool_mode` (`auto` | `client` | `native`) or env `CURSOR_TOOL_MODE`:
+Three routing modes, controlled by `cursor_tool_mode` (`auto` | `client` | `native`) or env `CURSOR_TOOL_MODE`. There is no marker protocol — client tools are always bridged as native SDK `customTools` (see [`docs/native-client-tools.md`](docs/native-client-tools.md)):
 
 | Mode | When to use | Tool behavior |
 |------|-------------|---------------|
-| **`client`** | Hermes main thread, thinking, coding sub-turns | Marker protocol + CLIENT TOOL INVENTORY; Hermes executes tools locally |
-| **`native`** | `delegate_task` / standalone Cursor worker with no upstream tools | Full Cursor SDK tools (Read, Shell, Write, …); no marker protocol |
-| **`auto`** (default) | Generic OpenAI clients | `client` when request has non-empty `tools` and `tool_choice` ≠ `"none"`; otherwise plain/native |
+| **`client`** | Hermes main thread, any caller supplying its own `tools[]` | Client tools registered as native SDK `customTools`; the model calls them through Cursor's native channel, captured by the bridge and surfaced as OpenAI `tool_calls`. The proxy injects only the one-paragraph `NATIVE_CLIENT_TOOL_STEER` (no CLIENT TOOL INVENTORY, no anti-Cursor identity block); Hermes WHO/WHAT content is preserved. The caller executes tools locally and resends results |
+| **`native`** | `delegate_task` / standalone Cursor worker with no upstream tools | Full Cursor SDK tools (Read, Shell, Write, …); the default worker path |
+| **`auto`** (default) | Generic OpenAI clients | `client` behavior when request has non-empty `tools` and `tool_choice` ≠ `"none"`; otherwise plain/native |
+
+Captured native calls map to `tool_calls` with `finish_reason: "tool_calls"`. Parallel calls (N≥3) share one `ClientToolCaptureSink`. **Built-in tool containment:** the SDK cannot disable/allowlist Cursor's always-live built-in Read/Shell/Grep/Write, so `client` mode ships only a minimal prompt steer toward the caller-provided tools; the heavier opt-in levers (isolated sandbox `CURSOR_CWD`, `mode:"plan"`) are documented but left unwired — see [`docs/native-client-tools.md`](docs/native-client-tools.md).
 
 Set explicitly on each request (recommended for Hermes):
 
@@ -383,23 +389,23 @@ Three HTTP-level behaviors:
 
 1. **Plain chat** (default) — `CURSOR_EMIT_TOOL_CALLS=false` and no `tools` on the request. Cursor may use its own tools in `CURSOR_CWD`, but the proxy does not surface them; `finish_reason` stays `stop` and only assistant text/reasoning is returned.
 
-2. **Client tool loop** (OpenCode / AI SDK) — When the request includes a non-empty `tools` array and `tool_choice` is not `"none"`, the proxy enters **client tool loop** mode automatically:
-   - Instructs the model to emit Composer tool-call markers for **your** tool names.
-   - Parses those markers from the text stream and returns OpenAI `tool_calls` with `finish_reason: "tool_calls"`.
+2. **Client tools** (OpenCode / AI SDK / Hermes) — When the request includes a non-empty `tools` array and `tool_choice` is not `"none"`, the proxy registers them as native SDK `customTools`:
+   - The tools are exposed via the synthetic `custom-user-tools` MCP server, and the model invokes them through Cursor's native tool channel. The call lands in the bridge's `execute`, the run is cancelled, and the call is surfaced as an OpenAI `tool_call` with `finish_reason: "tool_calls"`. See `src/client-tools/custom-tools-bridge.ts`.
+   - The proxy injects only the slim `NATIVE_CLIENT_TOOL_STEER` paragraph (no CLIENT TOOL INVENTORY, no marker directive); upstream persona/skills/task content is preserved.
    - Supports function tools only; non-function tool definitions are rejected.
    - Your client executes tools locally and resends `tool` / `assistant.tool_calls` messages; the proxy does not run client tool handlers.
    - `CURSOR_EMIT_TOOL_CALLS` is ignored for these requests (Cursor-internal tool events are not forwarded).
    - `POST /v1/responses` with `tools` is rejected (use chat completions).
 
-3. **Cursor tool visibility** — `CURSOR_EMIT_TOOL_CALLS=true` (or `cursor_emit_tool_calls: true`) only when **not** in client tool loop. Surfaces Cursor SDK `tool-call-*` deltas as best-effort OpenAI `tool_calls` (Read, Shell, etc.). Usually **not** what you want alongside OpenCode's own `tools` array.
+3. **Cursor tool visibility** — `CURSOR_EMIT_TOOL_CALLS=true` (or `cursor_emit_tool_calls: true`) only when the request carries **no** client tools. Surfaces Cursor SDK `tool-call-*` deltas as best-effort OpenAI `tool_calls` (Read, Shell, etc.). Usually **not** what you want alongside OpenCode's own `tools` array.
 
-**Note:** The SDK may still run Cursor's built-in tools in the workspace when the model ignores the client-tool prompt. The HTTP response only exposes **client** `tool_calls`. If you see unexpected file changes during client tool loops, treat that as a known limitation until a stricter SDK guard exists.
+**Note:** The SDK's *built-in* tools (Read, Shell, Grep, WebSearch, …) are always live and cannot be disabled or allowlisted — those are not part of your `tools[]`, so the HTTP response only exposes **client** `tool_calls`. The bridge captures native invocations of your *client* tool names (so a Hermes-only tool like `session_search` / `delegate_task` no longer hard-fails with "Tool not found"). If you see unexpected file changes from built-in tools, that residual leak remains until a stricter SDK guard exists — see [`docs/native-client-tools.md`](docs/native-client-tools.md).
 
-**Identity confusion (Hermes / OpenCode):** When `cursor_tool_mode` is `client` (or `auto` with upstream tools), the proxy injects a marker-protocol directive that overrides tool *invocation* while preserving upstream persona/skills for content. Composer may still claim it is "Cursor IDE" and try native Read/Shell tools — the directive explicitly forbids that. For standalone delegation, pass `cursor_tool_mode: "native"` so the model uses full SDK tooling instead. Restart the proxy after updating `src/client-tools/prompt.ts`.
+**Identity (Hermes / OpenCode):** Client tools are bridged through Cursor's own native channel, so the model keeps its real Cursor agent identity — there is no anti-Cursor identity block and no marker directive. The proxy injects only the one-paragraph `NATIVE_CLIENT_TOOL_STEER` toward the caller-provided tools; upstream Hermes SYSTEM content supplies persona/task. Restart the proxy after updating `src/client-tools/prompt.ts`.
 
 ### Tool filtering
 
-Each client tool ships a prose-heavy JSON schema, and injecting all ~28 Hermes tools into the CLIENT TOOL INVENTORY every turn is the dominant fixed prompt cost on the client path. The proxy can drop tools a turn cannot use **before** they are serialized, with no upstream Hermes change.
+Each client tool ships a prose-heavy JSON schema, and registering all ~28 Hermes tools as `customTools` every turn is the dominant fixed prompt cost on the client path. The proxy can drop tools a turn cannot use **before** they are registered, with no upstream Hermes change.
 
 Three independent levers, resolvable per request (field), via `metadata` (comma-separated string), or as an env default:
 
@@ -422,27 +428,21 @@ Patterns are exact, or a trailing `*` for a prefix match. `deny` always wins; `a
 
 Toolset names mirror Hermes (`file`, `terminal`, `coding`, `browser`, `delegation`, `cronjob`, `memory`, `session_search`, `skills`, `messaging`, `interaction`, `todo`, `tts`, `computer_use`); the name→toolset map lives in `src/client-tools/toolsets.ts`.
 
-Measure the savings on a representative inventory:
-
-```bash
-bun run scripts/measure-tool-tokens.ts                       # bundled sample
-bun run scripts/measure-tool-tokens.ts --tools captured.json # a real request's tools[]
-bun run scripts/measure-tool-tokens.ts --deny 'browser_*,cronjob' --toolsets file,terminal
-```
-
-> Note: filtering applies to the client-mode marker inventory (`clientToolSpecs`). In client mode the inventory is already serialized **once** (no `tools` array is forwarded to the Cursor SDK), so the lever here is trimming the set, not de-duplicating it.
+> Note: filtering trims the set of client tools registered as `customTools`. The kept set is registered **once** per turn, so the lever here is reducing the schema map, not de-duplicating it.
 
 ### Tool tiers (progressive disclosure)
 
-Filtering removes tools entirely. Tiering keeps **every tool callable** but renders the rarely-used ones compactly. The insight: the model only needs a tool's **name + argument names** to emit a correct marker call — Hermes (the executor) already holds the full schema — so the verbose prose schema can be replaced with a one-line signature.
+Filtering removes tools entirely. Tiering keeps **every tool callable** but renders the rarely-used ones with a terse `inputSchema`. The insight: the model only needs a tool's **name + argument names** to issue a correct native call — Hermes (the executor) already holds the full schema — so the verbose prose schema can be replaced with a one-line signature on the long-tail `customTools`.
 
 Set `cursor_tool_tier` (request), `metadata.cursor_tool_tier`, or `CURSOR_TOOL_TIER`:
 
-| Mode | Rendering | Sample size |
-|------|-----------|-------------|
-| `full` (default) | Every tool gets its full JSON schema | baseline |
-| `tiered` | Resident tools full; the rest as `name(arg1, arg2?) — summary` | −54% |
+| Mode | `customTool` schema rendering | Sample size |
+|------|-------------------------------|-------------|
+| `full` | Every tool gets its full JSON schema | baseline |
+| `tiered` (default) | Resident tools full; the rest as `name(arg1, arg2?) — summary` | −41% |
 | `brief` | Every tool as a signature line | −86% |
+
+The client orchestrator defaults to `tiered` (set `CURSOR_TOOL_TIER=full` to restore full schemas everywhere). A direct build with no tier resolved still renders `full`. Tiering is load-bearing for token parity with the old marker inventory — see [`docs/native-client-tools.md`](docs/native-client-tools.md).
 
 In `tiered` mode the resident set (full-schema tools) defaults to `read_file, write_file, patch, search_files, terminal, delegate_task` and is overridable via `cursor_tool_resident` / `CURSOR_TOOL_RESIDENT`. Brief entries mark optional args with `?`.
 
@@ -450,13 +450,13 @@ In `tiered` mode the resident set (full-schema tools) defaults to `read_file, wr
 { "model": "composer-2.5", "cursor_tool_mode": "client", "cursor_tool_tier": "brief", "tools": [ ... ] }
 ```
 
-To choose a resident set from real usage, set `CURSOR_TOOL_USAGE_LOG=/path/to/tool-usage.jsonl`; every client tool call is appended as `{"ts","tool"}`. Measure tier savings with `bun run scripts/measure-tool-tokens.ts` (now includes `tiered` / `brief` scenarios).
+To choose a resident set from real usage, set `CURSOR_TOOL_USAGE_LOG=/path/to/tool-usage.jsonl`; every client tool call is appended as `{"ts","tool"}`.
 
 ## Hermes integration
 
 Jarvis/Hermes uses Composer via this proxy in two distinct shapes:
 
-### Main thread (orchestrator + tool loop)
+### Main thread (orchestrator + client tools)
 
 Hermes sends its tool schemas (`read_file`, `terminal`, `patch`, …) on every agent turn. Tell the proxy explicitly:
 
@@ -469,13 +469,14 @@ Hermes sends its tool schemas (`read_file`, `terminal`, `patch`, …) on every a
 }
 ```
 
-- Proxy enters **client tool loop**: marker protocol, CLIENT TOOL INVENTORY, Hermes executes tools.
-- Hermes SOUL/skills/memory still apply to *what* to do; proxy controls *how* tools are invoked.
+- Proxy registers the tools as native SDK `customTools`; the model invokes them through Cursor's native channel and the bridge surfaces them as OpenAI `tool_calls`. Hermes executes the tools locally and resends results.
+- Hermes SOUL/skills/memory still apply to *what* to do; the proxy controls *how* tools are invoked.
 - `cursor_tool_mode: "client"` makes the routing unambiguous even if auto-detection would have worked.
+- The injected framing is intentionally **lean** — only the one-paragraph `NATIVE_CLIENT_TOOL_STEER` (no CLIENT TOOL INVENTORY, no anti-Cursor identity block), and the `customTool` schemas default to the `tiered` tool tier to cut prompt cost.
 
 ### Standalone delegation (full Cursor SDK)
 
-When Hermes spawns a powerful standalone worker (`delegate_task`, coding agent, etc.) that should use Cursor's native tools directly:
+Native is the **default worker execution path**: a delegated worker runs Cursor's tools in-agent and (by default) narrates its progress back to the caller. When Hermes spawns a powerful standalone worker (`delegate_task`, coding agent, etc.) that should use Cursor's native tools directly:
 
 ```json
 {
@@ -486,10 +487,13 @@ When Hermes spawns a powerful standalone worker (`delegate_task`, coding agent, 
 }
 ```
 
-- Omit `tools` (or set `tool_choice: "none"`).
-- Proxy injects a **native SDK directive** — use Read/Shell/Write/Grep, not marker protocol.
-- Optionally set `cursor_emit_tool_calls: true` to surface SDK tool use as OpenAI `tool_calls`.
-- Point `CURSOR_CWD` at the target workspace; use a separate session id from the main Hermes thread.
+- Omit `tools` (or set `tool_choice: "none"`). Native mode ignores any client `tools[]` by design (it drives SDK tools), so a delegated child that still carries Hermes schemas is fine.
+- Proxy injects a **native SDK directive** — use Read/Shell/Write/Grep directly.
+- **Progress narration is on by default for native turns**: tool starts/results (and live shell stdout) stream as `reasoning_content` (`→ read(...)` / `✓ read → ...`), so the caller sees live progress instead of a silent worker. This is decoupled from `CURSOR_INCLUDE_THINKING` — it has its own lever, `cursor_native_progress` / `CURSOR_NATIVE_PROGRESS`. Set `cursor_native_progress: false` to silence it. (Caveat: narration rides the reasoning channel, so a platform that strips reasoning won't show it.)
+- Optionally set `cursor_emit_tool_calls: true` to surface SDK tool use as OpenAI `tool_calls` instead — this turns native progress narration off (one channel per tool event).
+- Point `cursor_cwd` at the target workspace; each delegated leaf carries its own `hermes_session_id`, so it gets a distinct proxy session from the orchestrator (no cross-bind).
+
+**Workspace, allowlist, and `.env`.** The canonical multi-root workspace is `~/hermes-cursor-symbiosis.code-workspace` (git repo `cursor-openai-api` first so it is the SDK's primary/git root, then `~/.hermes`). A `.code-workspace` `cursor_cwd` expands to its declared roots; the session cache keys on the full sorted root set so workspaces sharing a first root don't collide. Per-request `cursor_cwd` overrides are gated by `CURSOR_CWD_ALLOWLIST` (an out-of-allowlist path returns `400 cwd_not_allowed`); an empty/unset allowlist is unrestricted, so set it in production. The proxy loads `.env` at startup (`src/load-env.ts`) with `process.env` taking precedence — important because under launchd (`node dist/index.js`) `.env` is not auto-loaded.
 
 ### Lifecycle: completion & calling other models
 
@@ -498,17 +502,17 @@ Both modes carry an explicit, symmetric contract so the model always knows how t
 | Concern | `client` (main thread) | `native` (delegated worker) |
 |---------|------------------------|------------------------------|
 | Identity | Main agent / orchestrator — no upstream to hand back to | Delegated worker — returns to the orchestrator that called it |
-| Signal "done" | Stop emitting tool-call markers and write a final text answer. Absence of a marker ends the turn (`finish_reason: stop`) and returns control. No special done token. | End the turn with a final text response. That text is returned verbatim to the orchestrator. No special done token. |
-| Loop | Emit one marker → client runs it → `TOOL RESULT` comes back → continue | Use Cursor SDK tools directly across the single turn |
-| Call another model / subagent | Call a delegation tool (e.g. `delegate_task`) from CLIENT TOOL INVENTORY via the marker protocol; result returns as a `TOOL RESULT`. Don't curl the proxy. | `curl` the proxy at `proxyBaseUrl` (`/v1/chat/completions`); injected when the native worker is given the proxy base URL. |
+| Signal "done" | Stop invoking tools and write a final text answer. The absence of a tool call ends the turn (`finish_reason: stop`) and returns control. No special done token. | End the turn with a final text response. That text is returned verbatim to the orchestrator. No special done token. |
+| Loop | Invoke a tool → the run is captured + cancelled → caller runs it and resends the result → continue | Use Cursor SDK tools directly across the single turn |
+| Call another model / subagent | Call a delegation tool (e.g. `delegate_task`) as a client tool; the call returns as an OpenAI `tool_call` that Hermes executes. Don't curl the proxy. | `curl` the proxy at `proxyBaseUrl` (`/v1/chat/completions`); injected when the native worker is given the proxy base URL. |
 
-The key compatibility guarantee: in **neither** mode does the model emit a magic stop token — ending the turn (no markers in `client`, final text in `native`) is the completion signal, and each mode has exactly one sanctioned channel for invoking other models.
+The key compatibility guarantee: in **neither** mode does the model emit a magic stop token — ending the turn (no tool call in `client`, final text in `native`) is the completion signal, and each mode has exactly one sanctioned channel for invoking other models.
 
 ### Quick reference
 
 | Call site | `cursor_tool_mode` | `tools` | Result |
 |-----------|-------------------|---------|--------|
-| Hermes main / thinking | `client` | Hermes schemas | Marker protocol |
+| Hermes main / thinking | `client` | Hermes schemas | Native `customTools` → captured `tool_calls` |
 | `delegate_task` coding worker | `native` | omit / `tool_choice: none` | Full Cursor SDK |
 | Generic OpenAI client | `auto` (default) | as needed | Auto-detect |
 

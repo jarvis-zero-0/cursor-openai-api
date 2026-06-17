@@ -39,6 +39,7 @@ export const responsesRequestSchema = z
       .optional(),
     cursor_model_params: z.array(modelParameterValueSchema).optional(),
     cursor_include_thinking: z.boolean().optional(),
+    cursor_native_progress: z.boolean().optional(),
     store: z.boolean().optional(),
     parallel_tool_calls: z.boolean().optional(),
     truncation: z.string().optional(),

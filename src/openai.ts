@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Handoff } from "./client-tools/handoff.js";
 import { ASSISTANT_TEXT_MODES } from "./assistant-text-mode.js";
 import { CURSOR_TOOL_MODES } from "./tool-mode.js";
 import { TOOL_TIER_MODES } from "./client-tools/catalog.js";
@@ -61,6 +62,7 @@ const chatCompletionRequestShape = {
   reasoning_effort: z.string().optional(),
   cursor_include_thinking: z.boolean().optional(),
   cursor_emit_tool_calls: z.boolean().optional(),
+  cursor_native_progress: z.boolean().optional(),
   cursor_tool_mode: z.enum(CURSOR_TOOL_MODES).optional(),
   cursor_enabled_toolsets: z.array(z.string()).optional(),
   cursor_tools_allow: z.array(z.string()).optional(),
@@ -159,6 +161,10 @@ export interface CursorCompletionMeta {
   actual_model?: string;
   thinking_duration_ms?: number;
   cache_write_tokens?: number;
+  // Structured self-report parsed from a native leaf's final text (subagent
+  // handoff contract). Present only on native-mode turns; the raw ```handoff
+  // fence also stays verbatim in the message content for backward compatibility.
+  handoff?: Handoff;
 }
 
 export interface ChatCompletionResponse {

@@ -3,8 +3,6 @@ import {
   emitAssistantText,
   flushAssistantText,
 } from "./assistant-output.js";
-import type { ClientToolTextHandler } from "./client-tools/text-handler.js";
-import { createClientToolTextHandler } from "./client-tools/text-handler.js";
 import { parseClientTools } from "./client-tools/request.js";
 import { filterClientTools } from "./client-tools/filter.js";
 import type { ClientToolSpec } from "./client-tools/types.js";
@@ -43,19 +41,14 @@ export function defaultAssistantTextStream(): AssistantTextStream {
   };
 }
 
-function asAssistantTextStream(handler: ClientToolTextHandler): AssistantTextStream {
-  return {
-    pushDelta: handler.pushText,
-    flushTurn: handler.flush,
-  };
-}
-
 export function resolveTurnStreamContext(
   request: ChatCompletionRequest,
   config: AppConfig,
 ): TurnStreamContext {
   const policy = resolveTurnPolicy(request, config);
-  if (!policy.clientToolLoop) {
+  // Client tools are bridged as native SDK customTools and captured as OpenAI
+  // tool_calls; assistant text passes through the default stream untouched.
+  if (!policy.clientTools) {
     return {
       policy,
       assistantText: defaultAssistantTextStream(),
@@ -66,6 +59,6 @@ export function resolveTurnStreamContext(
   return {
     policy,
     clientToolSpecs: specs,
-    assistantText: asAssistantTextStream(createClientToolTextHandler(specs)),
+    assistantText: defaultAssistantTextStream(),
   };
 }

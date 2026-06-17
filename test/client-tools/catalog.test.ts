@@ -113,12 +113,12 @@ describe("splitToolTiers", () => {
 });
 
 describe("resolveToolTier", () => {
-  test("defaults to full with the default resident set", () => {
+  test("defaults to tiered with the default resident set", () => {
     const tier = resolveToolTier(
       { messages: [{ role: "user", content: "hi" }] },
       baseConfig,
     );
-    expect(tier.mode).toBe("full");
+    expect(tier.mode).toBe("tiered");
     expect(tier.resident.has(DEFAULT_RESIDENT_TOOLS[0]!)).toBe(true);
   });
 

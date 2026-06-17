@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createClientToolTextHandler } from "../src/client-tools/text-handler.js";
 import type { ClientToolSpec } from "../src/client-tools/types.js";
 import { chunksFromInteractionUpdate } from "../src/interaction-delta.js";
 import { createStreamState } from "../src/stream.js";
@@ -9,25 +8,24 @@ import {
   type TurnStreamContext,
 } from "../src/turn-stream.js";
 
+// Client tools are bridged as native customTools; assistant text always flows
+// through the default stream (no marker parsing).
 function streamContext(policy: TurnPolicy, specs?: ClientToolSpec[]): TurnStreamContext {
   if (!specs?.length) {
     return { policy, assistantText: defaultAssistantTextStream() };
   }
-  const text = createClientToolTextHandler(specs);
   return {
     policy,
     clientToolSpecs: specs,
-    assistantText: {
-      pushDelta: text.pushText,
-      flushTurn: text.flush,
-    },
+    assistantText: defaultAssistantTextStream(),
   };
 }
 
 const livePolicy: TurnPolicy = {
   includeThinking: true,
   emitCursorTools: false,
-  clientToolLoop: false,
+  nativeProgress: false,
+  clientTools: false,
   debugStream: false,
   assistantTextMode: "live",
 };
@@ -45,16 +43,30 @@ const preamblePolicy: TurnPolicy = {
 const withCursorTools: TurnPolicy = {
   includeThinking: false,
   emitCursorTools: true,
-  clientToolLoop: false,
+  nativeProgress: false,
+  clientTools: false,
   debugStream: false,
   assistantTextMode: "final-content",
+};
+
+// Native worker with progress narration on. includeThinking is false to prove
+// narration is decoupled from the thinking lever.
+const nativeProgressPolicy: TurnPolicy = {
+  includeThinking: false,
+  emitCursorTools: false,
+  nativeProgress: true,
+  clientTools: false,
+  toolMode: "native",
+  debugStream: false,
+  assistantTextMode: "live",
 };
 
 const clientToolPreambleStream = streamContext(
   {
     includeThinking: true,
     emitCursorTools: false,
-    clientToolLoop: true,
+    nativeProgress: false,
+    clientTools: true,
     debugStream: false,
     assistantTextMode: "preamble-as-reasoning",
   },
@@ -65,7 +77,8 @@ const clientToolLiveStream = streamContext(
   {
     includeThinking: true,
     emitCursorTools: false,
-    clientToolLoop: true,
+    nativeProgress: false,
+    clientTools: true,
     debugStream: false,
     assistantTextMode: "live",
   },
@@ -76,7 +89,8 @@ const clientToolEchoStream = streamContext(
   {
     includeThinking: false,
     emitCursorTools: false,
-    clientToolLoop: true,
+    nativeProgress: false,
+    clientTools: true,
     debugStream: false,
     assistantTextMode: "live",
   },
@@ -302,7 +316,7 @@ describe("chunksFromInteractionUpdate", () => {
     expect(flushed[0]?.choices[0]?.delta.content).toBe("Calling tool.");
   });
 
-  test("client tool loop respects preamble-as-reasoning for visible text", () => {
+  test("client-tool turn respects preamble-as-reasoning for visible text", () => {
     const state = createStreamState("composer-2");
     const stream = clientToolPreambleStream;
 
@@ -328,33 +342,33 @@ describe("chunksFromInteractionUpdate", () => {
     expect(reasoning[1]?.choices[0]?.delta.reasoning_content).toBe("planning");
   });
 
-  test("parses client tool markers from text-delta in client tool loop", () => {
+  test("passes assistant text through untouched on the client-tool path (no marker parsing)", () => {
     const state = createStreamState("composer-2");
-    const marker = [
+    // Marker-like syntax must NOT be parsed any more — the bridge captures
+    // native customTool invocations, and assistant text is streamed verbatim.
+    const text = [
       "Checking.\n",
       "<|tool_calls_begin|><|tool_call_begin|>\n",
       "Glob\n",
-      "<|tool_sep|>glob_pattern\n",
-      "*\n",
       "<|tool_call_end|><|tool_calls_end|>",
     ].join("");
 
     const chunks = [
       ...chunksFromInteractionUpdate(
-        { type: "text-delta", text: marker },
+        { type: "text-delta", text },
         state,
         clientToolLiveStream,
       ),
     ];
 
-    expect(chunks[0]?.choices[0]?.delta.content).toBe("Checking.\n");
-    expect(chunks[1]?.choices[0]?.delta.tool_calls?.[0]?.function?.name).toBe(
-      "glob",
-    );
-    expect(state.toolCalls.size).toBe(1);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices[0]?.delta.content).toBe(text);
+    expect(chunks[0]?.choices[0]?.delta.tool_calls).toBeUndefined();
+    expect(state.toolCalls.size).toBe(0);
+    expect(state.text).toBe(text);
   });
 
-  test("suppresses SDK tool-call events in client tool loop", () => {
+  test("suppresses SDK tool-call events on the client-tool path", () => {
     const state = createStreamState("composer-2");
     const chunks = [
       ...chunksFromInteractionUpdate(
@@ -369,5 +383,60 @@ describe("chunksFromInteractionUpdate", () => {
     ];
     expect(chunks).toHaveLength(0);
     expect(state.toolCalls.size).toBe(0);
+  });
+
+  // Tool lifecycle (start/result) is narrated ONLY on the run.stream() tool_call
+  // path (stream.ts). The onDelta path must stay silent for those events even
+  // when nativeProgress is on, so each event yields exactly one progress line.
+  test("onDelta does not narrate tool-call lifecycle when nativeProgress is on", () => {
+    const state = createStreamState("composer-2");
+    const stream = streamContext(nativeProgressPolicy);
+
+    const started = [
+      ...chunksFromInteractionUpdate(
+        { type: "tool-call-started", callId: "c1", toolName: "read" } as never,
+        state,
+        stream,
+      ),
+    ];
+    const completed = [
+      ...chunksFromInteractionUpdate(
+        { type: "tool-call-completed" } as never,
+        state,
+        stream,
+      ),
+    ];
+    expect(started).toHaveLength(0);
+    expect(completed).toHaveLength(0);
+    expect(state.reasoningText).toBe("");
+    expect(state.toolCalls.size).toBe(0);
+  });
+
+  test("narrates incremental shell stdout when nativeProgress is on (thinking off)", () => {
+    const state = createStreamState("composer-2");
+    const chunks = [
+      ...chunksFromInteractionUpdate(
+        { type: "shell-output-delta", event: { stdout: "compiling...\n" } } as never,
+        state,
+        streamContext(nativeProgressPolicy),
+      ),
+    ];
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices[0]?.delta.reasoning_content).toBe(
+      "  compiling...\n",
+    );
+  });
+
+  test("does not narrate shell stdout when nativeProgress is off", () => {
+    const state = createStreamState("composer-2");
+    const chunks = [
+      ...chunksFromInteractionUpdate(
+        { type: "shell-output-delta", event: { stdout: "compiling...\n" } } as never,
+        state,
+        streamContext(livePolicy),
+      ),
+    ];
+    expect(chunks).toHaveLength(0);
+    expect(state.reasoningText).toBe("");
   });
 });

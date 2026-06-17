@@ -1,6 +1,7 @@
 import type { InteractionUpdate } from "@cursor/sdk";
 import { beforeInterleavedBoundary } from "./assistant-output.js";
 import { normalizeInteractionUpdate } from "./interaction-update.js";
+import { formatShellOutputProgressLine } from "./native-progress.js";
 import type { ChatCompletionChunk } from "./openai.js";
 import { chunkFromReasoningText, chunkFromToolDelta } from "./stream.js";
 import type { StreamState } from "./stream.js";
@@ -80,7 +81,27 @@ export function* chunksFromInteractionUpdate(
       return;
     }
     case "tool-call-completed":
+      // Tool lifecycle (start/result) is narrated solely on the run.stream()
+      // tool_call path (stream.ts) to avoid double-emit; nothing to do here.
       return;
+    case "shell-output-delta": {
+      // Live stdout streamed while a `shell` tool runs. This is a distinct
+      // incremental event (not the tool lifecycle), so narrating it here does
+      // not double-emit with the run.stream() tool_call path. Gated by
+      // nativeProgress alone, mirroring stream.ts.
+      //
+      // NOTE (probed @cursor/sdk 1.0.13): this event is not currently emitted —
+      // shell stdout arrives in the tool_call completion result instead. This
+      // branch is forward-looking for a future streaming SDK; it is exercised by
+      // unit tests but not by the live SDK today.
+      if (!policy.nativeProgress || !normalized.text) return;
+      const line = formatShellOutputProgressLine(normalized.text);
+      if (!line) return;
+      yield* beforeInterleavedBoundary(state, policy);
+      const chunk = chunkFromReasoningText(state, line);
+      if (chunk) yield chunk;
+      return;
+    }
     case "ignored":
       return;
     default:

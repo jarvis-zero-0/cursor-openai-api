@@ -8,6 +8,7 @@ export type NormalizedInteractionUpdate =
   | { type: "tool-call-started"; callId: string; name: string; args?: string }
   | { type: "partial-tool-call"; callId: string; name: string; args: string }
   | { type: "tool-call-completed" }
+  | { type: "shell-output-delta"; text: string }
   | { type: "ignored"; sourceType: string; reason: string };
 
 function ignored(sourceType: string, reason: string): NormalizedInteractionUpdate {
@@ -29,6 +30,37 @@ function readDurationMs(raw: object): number | undefined {
     Reflect.get(raw, "durationMs") ??
     Reflect.get(raw, "duration_ms");
   return typeof value === "number" ? value : undefined;
+}
+
+// NOTE (probed @cursor/sdk 1.0.13, 2026-06-16): the SDK does NOT currently emit
+// `shell-output-delta` at all — a 5s streaming `for…sleep` shell command produced
+// only `tool-call-started`/`tool-call-completed`, with the full stdout delivered
+// in the completion's `result.value.stdout` (narrated by stream.ts). This handler
+// is therefore defensive/forward-looking: if a future SDK starts streaming live
+// stdout, we want to surface it without a code change. Because the real shape is
+// unobserved, keep the extractor structural — pull a stdout-ish string from the
+// likely keys (top-level or nested under `value`) and ignore anything we cannot
+// read as text — better silent than narrating raw JSON noise. Tighten to a typed
+// shape only once a real event is captured.
+function readShellOutputChunk(raw: object): string | undefined {
+  const event = Reflect.get(raw, "event");
+  const record =
+    typeof event === "object" && event !== null
+      ? (event as Record<string, unknown>)
+      : (raw as Record<string, unknown>);
+  const keys = ["stdout", "output", "text", "chunk", "data", "content"];
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  const nested = record["value"];
+  if (typeof nested === "object" && nested !== null) {
+    for (const key of keys) {
+      const value = (nested as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.length > 0) return value;
+    }
+  }
+  return undefined;
 }
 
 function readArgsFragment(raw: object): string | undefined {
@@ -90,6 +122,13 @@ export function normalizeInteractionUpdate(
 
   if (type === "tool-call-completed") {
     return { type: "tool-call-completed" };
+  }
+
+  if (type === "shell-output-delta") {
+    const text = readShellOutputChunk(update);
+    return text !== undefined
+      ? { type: "shell-output-delta", text }
+      : ignored(type, "shell-output-delta had no readable stdout chunk");
   }
 
   return ignored(type, "unsupported interaction update type");

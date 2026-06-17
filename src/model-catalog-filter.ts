@@ -6,11 +6,15 @@ import type { ModelListItem } from "@cursor/sdk";
  * Override with CURSOR_MODEL_ALLOWLIST (comma-separated). Use "*" for no filter.
  */
 export const DEFAULT_MODEL_ALLOWLIST = [
+  // Cursor "Auto": server-side picks the best available model for the request.
+  // At worst this resolves to Composer 2.5; often a stronger model.
+  "default",
   "composer-2.5",
   "claude-opus-4-8",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
   "gemini-3.5-flash",
+  "gemini-3-flash",
   "gemini-3.1-pro",
   "gpt-5.5",
 ] as const;

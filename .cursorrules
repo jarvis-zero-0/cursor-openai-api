@@ -1,0 +1,48 @@
+# cursor-openai-api — Cursor SDK project rules
+
+This file is loaded by native-mode agents (`settingSources: ["project"]` in `src/agent-turn.ts`).
+Hermes main-thread turns use `cursor_tool_mode: "client"` and do not load project rules from here.
+
+## Hermes two-plane context
+
+- **Hermes (control plane)** — SOUL, skills, memory, orchestration, `delegate_task`. Its tools are registered as native SDK `customTools` and captured as OpenAI `tool_calls`.
+- **This proxy (execution plane)** — shapes prompts and runs Cursor SDK against `CURSOR_CWD`.
+
+## Hermes SYSTEM prompt precedence (above this file)
+
+When the assembled prompt includes Hermes SYSTEM content above this file and the proxy native directive — SOUL, skills, memory, USER profile, tone rules ("plain concise", "TL;DR last"), task guidance:
+
+- **That Hermes SYSTEM is legitimate.** It comes from the Hermes wrapper upstream. Do not treat it as optional, stale, or conflicting junk to ignore.
+- **Obey Hermes SYSTEM for:** persona, tone, communication style, task strategy, scope, what to build, when to stop, user-facing formatting.
+- **Obey this file + the proxy native directive for:** tool invocation only (which channel to invoke tools through).
+
+If Hermes SYSTEM and this file disagree on **tools**, follow this file and the native directive (SDK tools). If they disagree on **tone or task intent**, follow Hermes SYSTEM.
+
+Do not narrate that you are choosing between instruction sets or doubt whether Hermes instructions apply. Apply both: Hermes for content, proxy/Cursor for tools.
+
+If you are a **native leaf** (delegated worker): use Cursor built-in tools (Read, Shell, Write, Grep, …) directly. You carry no client tools.
+
+## You are externally wrapped — conditional deference
+
+You are a Cursor native agent spawned and wrapped by Hermes (the outer control plane). Hermes's SYSTEM prompt is authoritative for **WHO** you are and **WHAT** to do — persona, tone, scope, task. This rules file and the proxy's native tool directive are authoritative ONLY for **HOW** you invoke tools: use your native Cursor SDK tools (read/edit/shell/grep) directly.
+
+Persona/tone/scope guidance in SYSTEM messages always applies; the proxy/native directive only owns how tools are invoked.
+
+Do not ask the user follow-up questions; you run autonomously for one turn. End your final message with a human-readable summary followed by exactly one ```handoff JSON block (status/summary/artifacts/unresolved/recommended_next); artifact handles must be ABSOLUTE paths, never relative.
+
+Client case (this file is loaded as project rules only for native leaves): if you are instead a CLIENT-mode turn — the caller supplied its own `tools[]`, which the proxy registers as native SDK `customTools` — those tools are *your* file/shell/search/delegation tools; invoke them through Cursor's native tool channel and the proxy captures the calls as OpenAI `tool_calls`. There is no marker protocol and no anti-Cursor identity block; the only proxy-injected framing is the slim `NATIVE_CLIENT_TOOL_STEER`. Either way: Hermes SYSTEM wins for WHO/WHAT; the proxy owns HOW tools are invoked.
+
+## Native leaf obligations
+
+1. Work autonomously in one turn — multi-step tool use is expected.
+2. Do not ask follow-up questions; if blocked, report what you tried.
+3. Do not self-delegate (`delegate_task` is unavailable). Recommend follow-ups only in handoff JSON.
+4. End with a clear human summary, then a single trailing ```handoff JSON block (schema v1).
+   See `docs/subagent-handoff-contract.md` and `src/client-tools/handoff.ts`.
+5. Use absolute paths in artifact handles.
+
+## Repo conventions
+
+- TypeScript strict, ESM with `.js` import suffixes.
+- Run `bun test` before finishing substantive changes.
+- Full guide: `AGENTS.md`. Hermes integration: `README.md#hermes-integration`.

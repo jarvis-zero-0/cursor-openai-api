@@ -14,4 +14,10 @@ describe("normalizeToolArguments", () => {
   test("wraps invalid JSON as a JSON string", () => {
     expect(normalizeToolArguments("not-json")).toBe('"not-json"');
   });
+
+  test("unwraps double-encoded JSON objects", () => {
+    const inner = '{"goal":"Fix bug","context":"repo"}';
+    const doubleEncoded = JSON.stringify(inner);
+    expect(normalizeToolArguments(doubleEncoded)).toBe(inner);
+  });
 });

@@ -148,5 +148,6 @@ export function responsesToChatRequest(
     reasoning_effort: request.reasoning?.effort,
     cursor_model_params: request.cursor_model_params,
     cursor_include_thinking: request.cursor_include_thinking,
+    cursor_native_progress: request.cursor_native_progress,
   };
 }
