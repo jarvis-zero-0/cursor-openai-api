@@ -51,13 +51,13 @@ describe("extractHandoffBlock", () => {
 });
 
 describe("parseHandoff — hard-malformed (degraded synthetic report)", () => {
-  test("rule 1: no fence yields degraded partial from prose", () => {
+  test("rule 1: no fence yields degraded failed from prose", () => {
     const result = parseHandoff("I finished but forgot the block.");
     expect(result.ok).toBe(false);
-    expect(result.report.status).toBe("partial");
+    expect(result.report.status).toBe("failed");
     expect(result.report.summary).toBe("I finished but forgot the block.");
     expect(result.report._degraded).toBe(true);
-    expect(result.report.unresolved?.[0]?.severity).toBe("warn");
+    expect(result.report.unresolved?.[0]?.severity).toBe("error");
   });
 
   test("no usable output falls back to a placeholder summary", () => {

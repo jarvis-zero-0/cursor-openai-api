@@ -7,7 +7,7 @@ import type { ClientToolSpec } from "./types.js";
  * Progressive disclosure for the client-mode tool inventory (Phase 1).
  *
  * Key realization: the model does not need a tool's full prose JSON schema to
- * emit a correct marker call — it only needs the tool name and its argument
+ * emit a correct tool call — it only needs the tool name and its argument
  * names. Hermes (the executor) already holds the real schemas. So rarely-used
  * tools can be rendered as a compact signature (`name(arg1, arg2?) — summary`)
  * instead of the full schema, end-to-end, with no upstream change and no
@@ -33,17 +33,15 @@ export const DEFAULT_TOOL_TIER_MODE: ToolTierMode = "full";
 export const DEFAULT_ORCHESTRATOR_TOOL_TIER_MODE: ToolTierMode = "tiered";
 
 /**
- * High-frequency tools that stay resident (full schema) in `tiered` mode. These
- * are the ones an orchestrator calls directly most often; everything else is
- * cheap to render as a signature and pull detail for only when needed.
+ * High-frequency tools that stay resident (full schema) in `tiered` mode. For
+ * the Hermes orchestrator path these are router-only tools; execution tools are
+ * brief signatures or filtered out via allowlist.
  */
 export const DEFAULT_RESIDENT_TOOLS = [
-  "read_file",
-  "write_file",
-  "patch",
-  "search_files",
-  "terminal",
   "delegate_task",
+  "memory",
+  "send_message",
+  "cronjob",
 ];
 
 export interface ToolTierPolicy {

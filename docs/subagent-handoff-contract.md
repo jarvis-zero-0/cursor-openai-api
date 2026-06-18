@@ -149,11 +149,11 @@ A return is **malformed** if ANY of:
 Severity tiers and behavior:
 - **Hard-malformed** (rules 1–5): cannot trust the structure. Fallback → synthesize a minimal report from prose:
   ```json
-  { "schema_version": "1.0", "status": "partial", "summary": "<entire final text, trimmed>",
+  { "schema_version": "1.0", "status": "failed", "summary": "<entire final text, trimmed>",
     "artifacts": [], "unresolved": [{ "what": "structured handoff missing/invalid",
-    "why": "leaf returned prose only", "severity": "warn" }], "_degraded": true }
+    "why": "<parse reason>", "severity": "error" }], "_degraded": true }
   ```
-  The orchestrator MUST NOT treat a degraded report as `done` — it is forced to `partial` so artifacts are never trusted blind.
+  The orchestrator MUST NOT treat a degraded report as `done` — it is forced to `status:"failed"` so artifacts are never trusted blind and auto-resume does not loop on format failures.
 - **Soft-malformed** (rules 6–8): keep the valid top-level fields, drop the offending array elements, attach a `_warnings: string[]`. Status is preserved but downgraded from `done`→`partial` if any artifact was dropped.
 
 Unknown/extra fields not in the schema are ignored (forward-compatible), never an error.
@@ -204,7 +204,7 @@ The orchestrator (client mode, Hermes side) runs this algorithm on each `delegat
 |---|---|---|
 | **Leaf crash / SDK error** | `agent-turn.ts` lines 166–172 throw `ProxyError("agent_run_error")`; Hermes sees a non-200 / error tool result, no `handoff` block. | Synthesize `status:"failed"`, `summary` = error text. Do not re-spawn identically; inspect or escalate. |
 | **Timeout / cancelled** | `agent-turn.ts` lines 174–176 (499) or Hermes-side delegate timeout. | Synthesize `status:"partial"`, `truncated:true`. Eligible for a resume spawn. |
-| **No structured output (prose only)** | `parseHandoff` rule 1. | Degraded synthetic report (§4), forced `status:"partial"`, `_degraded:true`. Never trusted as done. |
+| **No structured output (prose only)** | `parseHandoff` rule 1. | Degraded synthetic report (§4), forced `status:"failed"`, `_degraded:true`. Never trusted as done; do not auto-resume identically. |
 | **Truncated mid-fence** (`max_tokens`) | JSON parse fails (rule 2) on an unterminated block. | Same as prose-only degraded path; usually also `truncated`. |
 | **Leaf tries to self-delegate** | Leaf runs in native mode with NO `delegate_task` tool available (it only has Cursor SDK built-ins). It cannot spawn. If it *recommends* delegation, that appears as a `recommended_next` entry. | Allowed as advice only. Orchestrator decides. The proxy enforces this structurally: native-mode requests carry no client `delegate_task` tool, and the native directive (`src/prompt.ts`) explicitly tells the leaf it is a delegated worker. Add a guard (see §7) so a `delegate_task` call emitted by a native leaf is dropped, not executed. |
 | **Conflicting recommendations** | §5 arbitration. | Pick one, fold the rest into notes / user prompt; never auto-spawn conflicting work. |

@@ -66,6 +66,21 @@ describe("buildSendPayload", () => {
       return payload as string;
     }
 
+    function orchestratorClientPayload(): string {
+      const orchExtras = {
+        tools: [
+          { type: "function" as const, function: { name: "delegate_task" } },
+        ],
+        toolChoice: "auto",
+      };
+      const orchSpecs = [
+        { name: "delegate_task", description: "Delegate work to a worker." },
+      ];
+      const payload = buildSendPayload(messages, orchExtras, orchSpecs);
+      expect(typeof payload).toBe("string");
+      return payload as string;
+    }
+
     test("dumps no tool schemas — tools are registered as native customTools", () => {
       const payload = nativeClientPayload();
       expect(payload).not.toContain("tool_calls_begin");
@@ -83,6 +98,14 @@ describe("buildSendPayload", () => {
       expect(payload).toContain("You are Hermes. Be concise.");
       expect(payload).toContain("List the files.");
       expect(payload).toContain("caller-provided tools");
+    });
+
+    test("orchestrator steer routes through delegate_task and forbids main-thread work", () => {
+      const payload = orchestratorClientPayload();
+      expect(payload).toContain("orchestrator main thread");
+      expect(payload).toContain("delegate_task");
+      expect(payload).not.toContain("Prefer them over Cursor's built-in tools");
+      expect(payload).toContain("Do not call read_file");
     });
 
     // The slim native client-tool framing drops the generic proxy framing and

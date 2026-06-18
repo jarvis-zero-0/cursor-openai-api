@@ -186,14 +186,14 @@ function synthesizeDegraded(finalText: string, reason: string): HandoffParseResu
   const trimmed = finalText.trim();
   const report: Handoff = {
     schema_version: HANDOFF_SCHEMA_VERSION,
-    status: "partial",
+    status: "failed",
     summary: trimmed || "Leaf returned no usable output.",
     artifacts: [],
     unresolved: [
       {
         what: "structured handoff missing/invalid",
-        why: "leaf returned prose only",
-        severity: "warn",
+        why: reason,
+        severity: "error",
       },
     ],
     _degraded: true,

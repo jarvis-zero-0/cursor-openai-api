@@ -13,7 +13,7 @@ import type { ClientToolSpec } from "./client-tools/types.js";
 import type { ToolTierPolicy } from "./client-tools/catalog.js";
 import { serializeMessagesToPrompt, buildNativeToolDirective } from "./prompt.js";
 import type { NativeToolContext } from "./prompt.js";
-import { NATIVE_CLIENT_TOOL_STEER } from "./client-tools/prompt.js";
+import { resolveClientToolSteer } from "./client-tools/prompt.js";
 import type { CursorToolMode } from "./tool-mode.js";
 
 export interface PromptExtras {
@@ -124,7 +124,9 @@ export function buildSendPayload(
     const body = stripGenericProxyFraming(
       serializeMessagesToPrompt(messages, extrasNoTools, undefined, undefined),
     );
-    return [NATIVE_CLIENT_TOOL_STEER, body].filter(Boolean).join("\n\n");
+    return [resolveClientToolSteer(clientToolSpecs.map((s) => s.name)), body]
+      .filter(Boolean)
+      .join("\n\n");
   }
   switch (classifySendPayload(messages, extras)) {
     case "sdk-user-message": {
