@@ -6,6 +6,7 @@ import {
   cwdIdentity,
   isCwdAllowed,
   parseCwdAllowlist,
+  requestedSkillNote,
   resolveWorkspaceCwd,
 } from "../src/workspace.js";
 import { testProxyConfig } from "./helpers/test-config.js";
@@ -371,6 +372,62 @@ describe("isCwdAllowed", () => {
     });
     expect(isCwdAllowed("/srv/hermes", config)).toBe(true);
     expect(isCwdAllowed("/srv/hermes-evil", config)).toBe(false);
+  });
+});
+
+describe("requestedSkillNote", () => {
+  test("returns undefined when nothing is supplied", () => {
+    expect(
+      requestedSkillNote({ messages: [{ role: "user", content: "hi" }] }),
+    ).toBeUndefined();
+  });
+
+  test("reads metadata.cursor_skill_note", () => {
+    expect(
+      requestedSkillNote({
+        messages: [{ role: "user", content: "hi" }],
+        metadata: { cursor_skill_note: "use the pdf skill" },
+      }),
+    ).toBe("use the pdf skill");
+  });
+
+  test("reads the camelCase metadata.cursorSkillNote alias", () => {
+    expect(
+      requestedSkillNote({
+        messages: [{ role: "user", content: "hi" }],
+        metadata: { cursorSkillNote: "use the pdf skill" },
+      }),
+    ).toBe("use the pdf skill");
+  });
+
+  test("falls back to the x-cursor-skill-note header", () => {
+    expect(
+      requestedSkillNote(
+        { messages: [{ role: "user", content: "hi" }] },
+        { "x-cursor-skill-note": "use the pdf skill" },
+      ),
+    ).toBe("use the pdf skill");
+  });
+
+  test("metadata beats header", () => {
+    expect(
+      requestedSkillNote(
+        {
+          messages: [{ role: "user", content: "hi" }],
+          metadata: { cursor_skill_note: "from-meta" },
+        },
+        { "x-cursor-skill-note": "from-header" },
+      ),
+    ).toBe("from-meta");
+  });
+
+  test("ignores blank values", () => {
+    expect(
+      requestedSkillNote({
+        messages: [{ role: "user", content: "hi" }],
+        metadata: { cursor_skill_note: "   " },
+      }),
+    ).toBeUndefined();
   });
 });
 

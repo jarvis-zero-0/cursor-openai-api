@@ -29,6 +29,25 @@ function requestedCwd(
   );
 }
 
+/**
+ * Per-request skill-routing note, mirroring how cwd / session id / tool mode are
+ * threaded through metadata + headers. Precedence: `metadata.cursor_skill_note`
+ * / `metadata.cursorSkillNote`, then the `x-cursor-skill-note` header. Surfaced
+ * to native leaves via the native tool directive's "SKILL ROUTING" block so the
+ * orchestrator can point a delegated worker at a specific skill.
+ */
+export function requestedSkillNote(
+  request: ChatCompletionRequest,
+  headers?: SessionRequestHeaders,
+): string | undefined {
+  const meta = request.metadata;
+  return (
+    trimmed(meta?.["cursor_skill_note"]) ??
+    trimmed(meta?.["cursorSkillNote"]) ??
+    trimmed(headers?.["x-cursor-skill-note"])
+  );
+}
+
 export function parseCwdAllowlist(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw

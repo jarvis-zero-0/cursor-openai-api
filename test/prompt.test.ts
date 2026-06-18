@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { buildSendPayload } from "../src/messages.js";
-import { serializeMessagesToPrompt } from "../src/prompt.js";
+import {
+  buildNativeToolDirective,
+  serializeMessagesToPrompt,
+} from "../src/prompt.js";
 
 describe("serializeMessagesToPrompt", () => {
   test("formats system and user messages", () => {
@@ -78,5 +81,34 @@ describe("serializeMessagesToPrompt", () => {
     expect(prompt).toContain("COMPLETION / RETURNING CONTROL");
     expect(prompt).toContain("control returns to the orchestrator");
     expect(prompt).toContain("no done/stop token");
+  });
+});
+
+describe("buildNativeToolDirective SKILLS", () => {
+  test("includes the SKILLS execution-plane block by default", () => {
+    const directive = buildNativeToolDirective();
+    expect(directive).toContain("SKILLS (execution-plane model):");
+    expect(directive).toContain("AUTO-LOADED from ~/.cursor/skills-cursor/");
+    expect(directive).toContain(
+      "skill_view / skills_list / skill_manage are Hermes CONTROL-PLANE tools",
+    );
+    expect(directive).toContain(
+      "author it under <workspace>/.cursor/skills/<name>/SKILL.md",
+    );
+  });
+
+  test("omits SKILL ROUTING when no skillNote is supplied", () => {
+    expect(buildNativeToolDirective()).not.toContain("SKILL ROUTING");
+    expect(
+      buildNativeToolDirective({ workspacePath: "/work" }),
+    ).not.toContain("SKILL ROUTING");
+  });
+
+  test("appends the orchestrator SKILL ROUTING note when provided", () => {
+    const directive = buildNativeToolDirective({
+      skillNote: "Use the pdf-export skill for this task.",
+    });
+    expect(directive).toContain("SKILL ROUTING (from orchestrator):");
+    expect(directive).toContain("Use the pdf-export skill for this task.");
   });
 });

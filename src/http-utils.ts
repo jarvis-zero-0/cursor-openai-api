@@ -13,6 +13,7 @@ export function extractSessionHeaders(c: Context): SessionRequestHeaders {
   return {
     "x-session-id": c.req.header("x-session-id"),
     "x-cursor-cwd": c.req.header("x-cursor-cwd"),
+    "x-cursor-skill-note": c.req.header("x-cursor-skill-note"),
   };
 }
 

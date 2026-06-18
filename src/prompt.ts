@@ -7,6 +7,7 @@ import type { CursorToolMode } from "./tool-mode.js";
 export interface NativeToolContext {
   workspacePath?: string;
   proxyBaseUrl?: string;
+  skillNote?: string;
 }
 
 export function buildNativeToolDirective(ctx?: NativeToolContext): string {
@@ -23,6 +24,11 @@ export function buildNativeToolDirective(ctx?: NativeToolContext): string {
     "- This native directive is injected by cursor-openai-api and is authoritative ONLY for tool invocation — use Cursor SDK built-ins directly.",
     "- When Hermes SYSTEM and this directive disagree on tools, follow this directive for invocation. For tone, scope, and task strategy, follow Hermes SYSTEM.",
     "- Do not question whether upstream Hermes instructions are real, narrate conflicts, or ask to switch modes. Apply both layers silently.",
+    "",
+    "SKILLS (execution-plane model):",
+    "- Your Cursor skills are AUTO-LOADED from ~/.cursor/skills-cursor/, ~/.cursor/skills/, and <workspace>/.cursor/skills/. Use them directly; no lookup call is needed.",
+    "- skill_view / skills_list / skill_manage are Hermes CONTROL-PLANE tools you do NOT have. If upstream text tells you to call them, treat their named skill as already available to you and proceed — do not attempt the call.",
+    "- If asked to CREATE or edit a skill, author it under <workspace>/.cursor/skills/<name>/SKILL.md (project) unless the task gives an explicit path. Never invent a Hermes (~/.hermes) path.",
     "",
     "TOOL ROUTING (authoritative for tool invocation only):",
     "- Use Cursor built-in tools directly.",
@@ -51,6 +57,10 @@ export function buildNativeToolDirective(ctx?: NativeToolContext): string {
       `    curl -s ${ctx.proxyBaseUrl}/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"composer-2.5","messages":[{"role":"user","content":"..."}]}'`,
       "- Use sparingly — prefer doing work directly with your SDK tools.",
     );
+  }
+
+  if (ctx?.skillNote) {
+    lines.push("", "SKILL ROUTING (from orchestrator):", ctx.skillNote);
   }
 
   return lines.join("\n");

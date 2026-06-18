@@ -5,7 +5,11 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import type { CursorToolMode } from "./tool-mode.js";
-import { cwdIdentity, resolveWorkspaceCwd } from "./workspace.js";
+import {
+  cwdIdentity,
+  requestedSkillNote,
+  resolveWorkspaceCwd,
+} from "./workspace.js";
 import { buildSendOptions, pumpSdkMessageStream } from "./agent-stream.js";
 import { CursorMetaAccumulator } from "./cursor-meta.js";
 import { isActiveRunError, ProxyError, mapCursorError } from "./errors.js";
@@ -102,7 +106,7 @@ async function runTurnBody(
   resolved: ResolvedModel,
   turnStream: TurnStreamContext,
 ): Promise<AgentTurnOutcome> {
-  const { request, proxy, abortSignal } = ctx;
+  const { request, proxy, abortSignal, headers } = ctx;
   const { config, sessions } = proxy;
   const extras = promptExtrasFromRequest(request);
   extras.toolTier = resolveToolTier(request, config);
@@ -126,6 +130,7 @@ async function runTurnBody(
     ? {
         workspacePath: prepared.cwd,
         proxyBaseUrl: `http://localhost:${config.PORT}`,
+        skillNote: requestedSkillNote(request, headers),
       }
     : undefined;
 
