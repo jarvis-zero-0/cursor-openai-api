@@ -172,6 +172,22 @@ export class SessionCache {
     this.sessionKeysByModel.clear();
   }
 
+  listEntries(): Array<{
+    session_id: string;
+    agent_id: string;
+    model_id: string;
+    message_count: number;
+    last_access: number;
+  }> {
+    return [...this.sessions.entries()].map(([key, entry]) => ({
+      session_id: key,
+      agent_id: entry.agentId,
+      model_id: entry.modelId,
+      message_count: entry.messageCount,
+      last_access: entry.lastAccess,
+    }));
+  }
+
   private pruneExpired(ttl: number): void {
     const now = Date.now();
 
