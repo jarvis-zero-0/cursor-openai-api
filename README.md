@@ -41,6 +41,9 @@ npm install
 | `CURSOR_AUTO_SESSION` | no | `true` | Reuse agents when a request extends a prior in-memory conversation (for clients like AI SDK that resend full `messages[]`) |
 | `CURSOR_SESSION_TTL_MS` | no | `1800000` | Evict idle cached agents after this many ms |
 | `CURSOR_SESSION_MAX` | no | `64` | Max concurrent cached agents |
+| `CURSOR_STREAM_TTFB_TIMEOUT_MS` | no | `900000` | Cancel the run and return `504` if the upstream produces no first delta within this many ms (time-to-first-byte). Defaults to 15min to tolerate a legitimate large-context Opus prefill |
+| `CURSOR_STREAM_IDLE_TIMEOUT_MS` | no | `300000` | Cancel the run and return `504` if a started stream goes silent for this many ms (inter-delta idle). Defaults to 5min to tolerate multi-minute mid-stream Opus thinking |
+| `CURSOR_STREAM_HEARTBEAT_MS` | no | `15000` | Emit an SSE comment ping at this cadence while awaiting the first content delta, so a slow prefill reads as live (stops on the first real delta). Set `0` to disable. **Best-effort only**: these pings keep generic OpenAI clients/intermediaries from treating the connection as idle, but they do **not** keep the hermes-agent consumer alive (hermes ignores SSE comment pings for staleness by design). The TTFB/idle timeouts above are the real protection, not the heartbeat |
 | `CURSOR_TOOL_TIER` | no | `tiered` | Client-tool schema tiering on the native `customTools` channel: `full` (every tool full schema), `tiered` (resident tools full, long tail as compact signatures), or `brief` (all compact). Provider-neutral, env-only — there is no per-request tier field |
 | `CURSOR_TOOL_RESIDENT` | no | (none) | Comma-separated tool names kept resident (full schema) in `tiered` mode. Opt-in only — when unset, every tool is rendered as a compact signature |
 | `DEBUG_STREAM` | no | `false` | Include agent status events as annotated `content` in streams |
