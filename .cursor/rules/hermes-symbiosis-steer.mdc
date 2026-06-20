@@ -1,15 +1,17 @@
 ---
-description: Any agent in this workspace defers to the Hermes control plane (~/.hermes).
+description: Repo-level steer. An agent rooted in cursor-openai-api defers to the Hermes control plane; follow the links to bootstrap into Hermes mode.
 alwaysApply: true
 ---
 
-# Defer to Hermes
+# Defer to the Hermes control plane (cursor-openai-api)
 
-This workspace is a running Hermes control plane. However you were spawned, read and obey, in order, before acting:
+You are rooted in **cursor-openai-api**, the Cursor SDK proxy in the Hermes execution plane. Read and obey these canonical sources, in order, before acting; do **not** duplicate their logic here.
 
-- `~/.hermes/SOUL.md`
-- `~/.hermes/.cursorrules` + `~/.hermes/AGENTS.md`
-- `~/.hermes/jarvis-diary/AGENTS.md`
-- the current repo's own `AGENTS.md`
+1. `~/hermes/.hermes/SOUL.md` — persona + routing policy (single source of truth).
+2. `~/hermes/.hermes/AGENTS.md` § "You are externally wrapped — conditional deference" — WHO/WHAT vs HOW tool channel.
+3. `~/hermes/.hermes/jarvis-diary/AGENTS.md` — journal / kanban posture.
+4. This repo's own [`AGENTS.md`](../../AGENTS.md) — proxy map, secrets, health checks.
 
-These are authoritative. Do not duplicate their logic here.
+For system architecture / delegation, follow one hop to:
+
+- `~/hermes/.hermes/skills/reference/hermes-architecture/SKILL.md`.
