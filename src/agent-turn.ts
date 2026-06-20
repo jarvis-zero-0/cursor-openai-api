@@ -12,8 +12,14 @@ import {
   startStreamWatchdog,
   type StreamActivity,
 } from "./agent-stream.js";
+import { authHealth } from "./auth-health.js";
 import { CursorMetaAccumulator } from "./cursor-meta.js";
-import { isActiveRunError, ProxyError, mapCursorError } from "./errors.js";
+import {
+  isActiveRunError,
+  isAuthWedgeError,
+  ProxyError,
+  mapCursorError,
+} from "./errors.js";
 import { resolveModel, type ResolvedModel } from "./model.js";
 import { resolveTurnStreamContext, type TurnStreamContext } from "./turn-stream.js";
 import {
@@ -359,14 +365,27 @@ export async function executeAgentTurn(
     agentOptions,
   );
 
-  const runPrepared = (p: PreparedChatSession) =>
-    sessions.withAgentTurn(p.agentId, () =>
+  const runPrepared = async (p: PreparedChatSession) => {
+    const outcome = await sessions.withAgentTurn(p.agentId, () =>
       runTurnBody(ctx, options, p, resolved, turnStream),
     );
+    // A completed turn proves auth is healthy; clear any auth-wedge streak.
+    authHealth.recordSuccess();
+    return outcome;
+  };
 
   try {
     return await runPrepared(prepared);
   } catch (err) {
+    // Stale-auth wedge: the long-lived process holds a rejected Cursor auth
+    // session, so a fresh in-process agent reuses the same poisoned transport
+    // and keeps failing (an in-process self-heal here would loop uselessly).
+    // Count it; the monitor exits the process after a threshold so launchd
+    // KeepAlive restarts with fresh auth — the only known recovery.
+    if (isAuthWedgeError(err)) {
+      authHealth.recordAuthWedge();
+      throw err;
+    }
     // Self-heal a cached agent left with a lingering non-terminal run (e.g. a
     // dropped stream / client disconnect). Reusing such an agent makes the SDK
     // throw "already has active run" on every turn, permanently wedging the
