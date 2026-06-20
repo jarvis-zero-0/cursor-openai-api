@@ -45,6 +45,7 @@ import {
   createStreamState,
   type StreamState,
 } from "./stream.js";
+import { maybeInjectWorkerContext } from "./worker-context.js";
 import {
   type ChatChunkWriter,
   createStreamSink,
@@ -114,11 +115,22 @@ function readRequestString(
 /**
  * Resolve the local-agent scope (cwd + settingSources) for this turn.
  *
- * Orchestrator path — `cursor_tool_mode` absent or anything other than
- * `"native"` — is byte-for-byte unchanged: the global `CURSOR_CWD` and empty
- * `settingSources`. Only a native worker leaf opts into loading its repo's
- * `project` settings (.cursor/rules + AGENTS.md), and only at an allowlisted
- * cwd; an out-of-allowlist `cursor_cwd` warns and falls back to `CURSOR_CWD`.
+ * `settingSources` is always empty — no entry point loads ambient `project`
+ * disk settings via the SDK. In the Cursor SDK, the `project` setting source is
+ * a single coupled switch that gates BOTH `.cursor/rules` + AGENTS.md AND the
+ * project `.cursor/mcp.json` servers (see `includeProjectMcp` in the SDK), so
+ * we deliberately leave it off: delegated native leaves must NOT pull in the
+ * heavy generated contract mdc. This does NOT remove a delegate's MCP/tool
+ * access — Hermes delivers delegate toolsets (platform_toolsets + inherited MCP
+ * toolsets) through the OpenAI `tools` channel, which the client-tool bridge
+ * exposes as the in-process `custom-user-tools` MCP server, entirely
+ * independent of `settingSources`. The direct Cursor IDE agent is a separate
+ * entry point (not this proxy) and still loads `.cursor/rules` + `.cursor/mcp.json`
+ * natively; it is unaffected by this scope.
+ *
+ * A native worker leaf still runs at its own repo cwd (an allowlisted
+ * `cursor_cwd`) so file/terminal tools operate in the right tree; an
+ * out-of-allowlist `cursor_cwd` warns and falls back to `CURSOR_CWD`.
  */
 export function resolveLocalAgentScope(
   request: ChatCompletionRequest,
@@ -140,7 +152,7 @@ export function resolveLocalAgentScope(
       );
     }
   }
-  return { cwd, settingSources: ["project"] };
+  return { cwd, settingSources: [] };
 }
 
 function createAgentOptions(
@@ -175,10 +187,14 @@ async function runTurnBody(
     prepared.sessionKey,
   );
 
-  const payload = buildSendPayload(
-    prepared.deltaMessages,
-    extras,
-    turnStream.clientToolSpecs,
+  // Durable awareness for delegated native workers: prepend the Hermes contract
+  // + skill index to the first send of a freshly created native leaf. Decoupled
+  // from `settingSources` (which stays `[]`); a no-op for the orchestrator and
+  // for reused agents (the preamble already lives in their persisted history).
+  const payload = maybeInjectWorkerContext(
+    buildSendPayload(prepared.deltaMessages, extras, turnStream.clientToolSpecs),
+    request,
+    prepared.isNewAgent,
   );
 
   // Client-tool bridge: register the request's client tools as in-process SDK

@@ -52,34 +52,38 @@ describe("resolveLocalAgentScope", () => {
     expect(scope).toEqual({ cwd: "/global/cwd", settingSources: [] });
   });
 
-  test("native + allowlisted cwd → that cwd + ['project']", () => {
+  // settingSources stays `[]` for native leaves too (Option 2): the contract +
+  // skill index reach delegated workers via the injected worker-context preamble
+  // (see worker-context.ts), NOT via the SDK `project` setting source. A native
+  // leaf still gets its allowlisted repo cwd so file/terminal tools land right.
+  test("native + allowlisted cwd → that cwd + [] (no project source)", () => {
     const scope = resolveLocalAgentScope(
       req({ cursor_tool_mode: "native", cursor_cwd: "/allow/repo-a" }),
       cfg(),
     );
     expect(scope).toEqual({
       cwd: "/allow/repo-a",
-      settingSources: ["project"],
+      settingSources: [],
     });
   });
 
-  test("native + nested-under-allowlist cwd → that nested cwd + ['project']", () => {
+  test("native + nested-under-allowlist cwd → that nested cwd + []", () => {
     const scope = resolveLocalAgentScope(
       req({ cursor_tool_mode: "native", cursor_cwd: "/allow/repo-a/pkg/sub" }),
       cfg(),
     );
     expect(scope).toEqual({
       cwd: "/allow/repo-a/pkg/sub",
-      settingSources: ["project"],
+      settingSources: [],
     });
   });
 
-  test("native + out-of-allowlist cwd → fallback to global cwd, still ['project']", () => {
+  test("native + out-of-allowlist cwd → fallback to global cwd, still []", () => {
     const scope = resolveLocalAgentScope(
       req({ cursor_tool_mode: "native", cursor_cwd: "/somewhere/else" }),
       cfg(),
     );
-    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: ["project"] });
+    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: [] });
   });
 
   test("native + sibling-prefix path is NOT treated as nested", () => {
@@ -87,14 +91,14 @@ describe("resolveLocalAgentScope", () => {
       req({ cursor_tool_mode: "native", cursor_cwd: "/allow/repo-a-evil" }),
       cfg(),
     );
-    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: ["project"] });
+    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: [] });
   });
 
-  test("native + no cursor_cwd → global cwd + ['project']", () => {
+  test("native + no cursor_cwd → global cwd + []", () => {
     const scope = resolveLocalAgentScope(
       req({ cursor_tool_mode: "native" }),
       cfg(),
     );
-    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: ["project"] });
+    expect(scope).toEqual({ cwd: "/global/cwd", settingSources: [] });
   });
 });
