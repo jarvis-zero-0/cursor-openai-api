@@ -99,6 +99,52 @@ describe("findMatchingSessionEntry", () => {
   });
 });
 
+describe("scope partitioning (cwd + settingSources)", () => {
+  test("does not reuse an entry created under a different scope", () => {
+    const agent = { agentId: "agent-scope" } as SDKAgent;
+    // Unique modelId so the shared module-level store can't cross-match other
+    // tests' entries (which all use composer-* with scopeSig "").
+    const modelId = "scope-test-model";
+    store.registerTestSession("auto:scope", {
+      agent,
+      agentId: "agent-scope",
+      modelId,
+      messageCount: 1,
+      messagesSnapshot: [{ role: "user", content: "Hi" }],
+      lastAccess: Date.now(),
+      scopeSig: "/repo-a\u0000project",
+    });
+
+    const followUp = [
+      { role: "user" as const, content: "Hi" },
+      { role: "user" as const, content: "Again" },
+    ];
+
+    // Same scope → match.
+    expect(
+      store.findMatchingSessionEntry(
+        modelId,
+        followUp,
+        "/repo-a\u0000project",
+      )?.key,
+    ).toBe("auto:scope");
+
+    // Different scope (orchestrator default) → no match.
+    expect(
+      store.findMatchingSessionEntry(modelId, followUp, ""),
+    ).toBeUndefined();
+
+    // Different cwd, same settingSources → no match.
+    expect(
+      store.findMatchingSessionEntry(
+        modelId,
+        followUp,
+        "/repo-b\u0000project",
+      ),
+    ).toBeUndefined();
+  });
+});
+
 describe("session speed alias reuse", () => {
   test("auto-session matches base sdk id when follow-up uses slow alias", async () => {
     const agent = { agentId: "agent-speed" } as SDKAgent;
