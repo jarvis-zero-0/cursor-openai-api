@@ -1,4 +1,11 @@
-import { Agent, type ModelSelection, type Run } from "@cursor/sdk";
+import path from "node:path";
+import { realpathSync } from "node:fs";
+import {
+  Agent,
+  type ModelSelection,
+  type Run,
+  type SettingSource,
+} from "@cursor/sdk";
 import {
   buildSendOptions,
   pumpSdkMessageStream,
@@ -59,14 +66,86 @@ export interface AgentTurnOutcome {
   finalText?: string;
 }
 
+interface LocalAgentScope {
+  cwd: string;
+  settingSources: SettingSource[];
+}
+
+/**
+ * Canonicalize a path for allowlist containment: absolute-resolve, then follow
+ * symlinks when the path exists (so a symlinked repo root and its real path
+ * compare equal). Falls back to the resolved path when realpath fails.
+ */
+function canonicalize(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/** True when `target` is one of, or nested under, an allowlist entry. */
+function isUnderAllowlist(target: string, allowlist: string[]): boolean {
+  const t = canonicalize(target);
+  for (const entry of allowlist) {
+    const base = canonicalize(entry);
+    if (t === base || t.startsWith(base + path.sep)) return true;
+  }
+  return false;
+}
+
+function readRequestString(
+  request: ChatCompletionRequest,
+  key: string,
+): string | undefined {
+  const value = (request as Record<string, unknown>)[key];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Resolve the local-agent scope (cwd + settingSources) for this turn.
+ *
+ * Orchestrator path — `cursor_tool_mode` absent or anything other than
+ * `"native"` — is byte-for-byte unchanged: the global `CURSOR_CWD` and empty
+ * `settingSources`. Only a native worker leaf opts into loading its repo's
+ * `project` settings (.cursor/rules + AGENTS.md), and only at an allowlisted
+ * cwd; an out-of-allowlist `cursor_cwd` warns and falls back to `CURSOR_CWD`.
+ */
+export function resolveLocalAgentScope(
+  request: ChatCompletionRequest,
+  config: ProxyContext["config"],
+): LocalAgentScope {
+  if (readRequestString(request, "cursor_tool_mode") !== "native") {
+    return { cwd: config.CURSOR_CWD, settingSources: [] };
+  }
+
+  let cwd = config.CURSOR_CWD;
+  const requestedCwd = readRequestString(request, "cursor_cwd");
+  if (requestedCwd) {
+    if (isUnderAllowlist(requestedCwd, config.CURSOR_CWD_ALLOWLIST)) {
+      cwd = requestedCwd;
+    } else {
+      console.warn(
+        `[cursor-openai-api] native cursor_cwd ${JSON.stringify(requestedCwd)} ` +
+          `is not under CURSOR_CWD_ALLOWLIST; falling back to ${config.CURSOR_CWD}.`,
+      );
+    }
+  }
+  return { cwd, settingSources: ["project"] };
+}
+
 function createAgentOptions(
   config: ProxyContext["config"],
   sdkModel: ModelSelection,
+  scope: LocalAgentScope,
 ) {
   return {
     apiKey: config.CURSOR_API_KEY,
     model: sdkModel,
-    local: { cwd: config.CURSOR_CWD, settingSources: [] },
+    local: { cwd: scope.cwd, settingSources: scope.settingSources },
   };
 }
 
@@ -268,7 +347,8 @@ export async function executeAgentTurn(
     config,
     turnStream.policy.includeThinking,
   );
-  const agentOptions = createAgentOptions(config, resolved.sdk);
+  const scope = resolveLocalAgentScope(request, config);
+  const agentOptions = createAgentOptions(config, resolved.sdk, scope);
 
   const prepared = await sessions.prepareChatSession(
     () => Agent.create(agentOptions),
@@ -314,6 +394,8 @@ export async function executeAgentTurn(
       sessionKey: prepared.sessionKey,
       retainAgent: true,
       isNewAgent: true,
+      // Same agentOptions → same scope as the evicted agent.
+      scopeSig: prepared.scopeSig,
     };
     return await runPrepared(fresh);
   }

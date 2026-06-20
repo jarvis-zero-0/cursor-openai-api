@@ -77,6 +77,19 @@ const envSchema = z.object({
   // Opt-in only: when unset, no tool is resident and `tiered` mode renders
   // every tool as a compact signature.
   CURSOR_TOOL_RESIDENT: z.string().optional(),
+  // Comma-separated absolute paths a native worker leaf's `cursor_cwd` may
+  // resolve under. Lets a delegated leaf run with its repo's cwd (so the SDK's
+  // `project` setting source loads that repo's .cursor/rules + AGENTS.md) while
+  // keeping cwd selection bounded. Unset → [] (no cwd override is ever honored).
+  CURSOR_CWD_ALLOWLIST: z
+    .string()
+    .optional()
+    .transform((v) =>
+      (v ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    ),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

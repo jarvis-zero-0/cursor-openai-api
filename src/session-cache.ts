@@ -9,6 +9,11 @@ export interface SessionEntry {
   messageCount: number;
   messagesSnapshotHash: string;
   lastAccess: number;
+  // Local-agent scope (cwd + settingSources) the cached agent was created with.
+  // A cached agent must never be reused for a request that resolves to a
+  // different scope, or a native worker leaf would inherit the orchestrator's
+  // cwd / empty settingSources (and vice versa). "" == legacy/orchestrator.
+  scopeSig: string;
 }
 
 export interface SessionRegistration {
@@ -18,6 +23,7 @@ export interface SessionRegistration {
   messageCount: number;
   messagesSnapshot: ChatMessage[];
   lastAccess: number;
+  scopeSig?: string;
 }
 
 export interface SessionSave {
@@ -26,6 +32,7 @@ export interface SessionSave {
   modelId: string;
   messages: ChatMessage[];
   lastAccess: number;
+  scopeSig: string;
 }
 
 export interface SessionCacheLimits {
@@ -70,6 +77,7 @@ export class SessionCache {
   findAutoMatch(
     modelId: string,
     messages: ChatMessage[],
+    scopeSig = "",
   ): MatchedSession | undefined {
     const keys = this.sessionKeysByModel.get(modelId);
     if (!keys?.size) return undefined;
@@ -82,6 +90,7 @@ export class SessionCache {
         this.untrackSessionKey(key, modelId);
         continue;
       }
+      if (entry.scopeSig !== scopeSig) continue;
       if (messages.length <= entry.messageCount) continue;
       if (!messagesPrefixMatches(messages, entry)) continue;
       if (!best || entry.messageCount > best.entry.messageCount) {
@@ -97,12 +106,15 @@ export class SessionCache {
     key: string,
     modelId: string,
     messages: ChatMessage[],
+    scopeSig = "",
   ): MatchedSession | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
 
     const reusable =
-      entry.modelId === modelId && messagesPrefixMatches(messages, entry);
+      entry.modelId === modelId &&
+      entry.scopeSig === scopeSig &&
+      messagesPrefixMatches(messages, entry);
     if (!reusable) {
       this.invalidate(key);
       return undefined;
@@ -124,6 +136,7 @@ export class SessionCache {
       messageCount: entry.messages.length,
       messagesSnapshotHash: hashMessageSnapshot(entry.messages),
       lastAccess: entry.lastAccess,
+      scopeSig: entry.scopeSig,
     });
   }
 
@@ -161,6 +174,7 @@ export class SessionCache {
         entry.messagesSnapshot.slice(0, entry.messageCount),
       ),
       lastAccess: entry.lastAccess,
+      scopeSig: entry.scopeSig ?? "",
     });
   }
 

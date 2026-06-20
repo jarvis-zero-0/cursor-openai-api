@@ -27,6 +27,27 @@ export interface PreparedChatSession {
   // and retries reused agents — a fresh agent hitting an active-run error is a
   // genuine failure, not a stale-cache artifact.
   isNewAgent: boolean;
+  // Signature of the local-agent scope (cwd + settingSources) this agent was
+  // created with. Folded into the cache match so a cached agent with a different
+  // scope is never reused. "" == legacy/orchestrator scope.
+  scopeSig: string;
+}
+
+/**
+ * Stable signature of the local-agent scope (cwd + settingSources) so cached
+ * agents are partitioned by scope. Derived from the `Agent.create` options the
+ * turn will use, so the orchestrator (`settingSources: []`) and a native worker
+ * leaf (`settingSources: ["project"]` at its repo cwd) never share an agent.
+ */
+function agentScopeSignature(
+  opts?: Parameters<typeof Agent.create>[0],
+): string {
+  const local = opts?.local;
+  if (!local) return "";
+  const cwd = local.cwd;
+  const cwdStr = Array.isArray(cwd) ? cwd.join("|") : (cwd ?? "");
+  const settingSources = local.settingSources ?? [];
+  return `${cwdStr}\u0000${settingSources.join(",")}`;
 }
 
 export class SessionStore {
@@ -36,8 +57,9 @@ export class SessionStore {
   findMatchingSessionEntry(
     modelId: string,
     messages: ChatMessage[],
+    scopeSig = "",
   ): { key: string; entry: SessionEntry } | undefined {
-    return this.cache.findAutoMatch(modelId, messages);
+    return this.cache.findAutoMatch(modelId, messages, scopeSig);
   }
 
   async withAgentTurn<T>(
@@ -55,6 +77,8 @@ export class SessionStore {
     headers?: SessionRequestHeaders,
     createAgentOptions?: Parameters<typeof Agent.create>[0],
   ): Promise<PreparedChatSession> {
+    const scopeSig = agentScopeSignature(createAgentOptions);
+
     if (!config.CURSOR_ENABLE_SESSIONS) {
       const agent = await createAgent();
       return {
@@ -64,6 +88,7 @@ export class SessionStore {
         sessionKey: undefined,
         retainAgent: false,
         isNewAgent: true,
+        scopeSig,
       };
     }
 
@@ -72,12 +97,21 @@ export class SessionStore {
     const sessionKey = resolveSessionKey(request, headers);
 
     if (sessionKey) {
-      const keyed = this.tryKeyedSession(sessionKey, request, sdkModelId);
+      const keyed = this.tryKeyedSession(
+        sessionKey,
+        request,
+        sdkModelId,
+        scopeSig,
+      );
       if (keyed) return keyed;
     }
 
     if (config.CURSOR_AUTO_SESSION !== false) {
-      const matched = this.tryAutoMatchedSession(sdkModelId, request.messages);
+      const matched = this.tryAutoMatchedSession(
+        sdkModelId,
+        request.messages,
+        scopeSig,
+      );
       if (matched) return matched;
     }
 
@@ -88,6 +122,7 @@ export class SessionStore {
         createAgentOptions,
         request,
         sessionKey,
+        scopeSig,
       );
       if (resumed) return resumed;
     }
@@ -102,6 +137,7 @@ export class SessionStore {
       sessionKey,
       retainAgent: Boolean(sessionKey) || autoSession,
       isNewAgent: true,
+      scopeSig,
     };
   }
 
@@ -128,6 +164,7 @@ export class SessionStore {
       modelId,
       messages: request.messages,
       lastAccess: Date.now(),
+      scopeSig: prepared.scopeSig,
     });
     this.pruneCache(config);
     return key;
@@ -170,11 +207,13 @@ export class SessionStore {
     sessionKey: string,
     request: ChatCompletionRequest,
     modelId: string,
+    scopeSig: string,
   ): PreparedChatSession | undefined {
     const matched = this.cache.matchKeyedSession(
       sessionKey,
       modelId,
       request.messages,
+      scopeSig,
     );
     return matched
       ? this.prepareFromMatchedSession(matched, request.messages)
@@ -184,8 +223,9 @@ export class SessionStore {
   private tryAutoMatchedSession(
     modelId: string,
     messages: ChatMessage[],
+    scopeSig: string,
   ): PreparedChatSession | undefined {
-    const matched = this.findMatchingSessionEntry(modelId, messages);
+    const matched = this.findMatchingSessionEntry(modelId, messages, scopeSig);
     if (!matched) return undefined;
     return this.prepareFromMatchedSession(matched, messages);
   }
@@ -195,6 +235,7 @@ export class SessionStore {
     createAgentOptions: Parameters<typeof Agent.create>[0],
     request: ChatCompletionRequest,
     sessionKey: string | undefined,
+    scopeSig: string,
   ): Promise<PreparedChatSession | undefined> {
     try {
       const agent = await Agent.resume(resumeAgentId, createAgentOptions);
@@ -202,6 +243,7 @@ export class SessionStore {
       const deltaMessages =
         entry &&
         entry.agentId === agent.agentId &&
+        entry.scopeSig === scopeSig &&
         messagesPrefixMatches(request.messages, entry)
           ? deltaMessagesFromSession(request.messages, entry)
           : request.messages;
@@ -212,6 +254,7 @@ export class SessionStore {
         sessionKey,
         retainAgent: Boolean(sessionKey),
         isNewAgent: false,
+        scopeSig,
       };
     } catch (err) {
       console.warn(
@@ -233,6 +276,7 @@ export class SessionStore {
       sessionKey: matched.key,
       retainAgent: true,
       isNewAgent: false,
+      scopeSig: matched.entry.scopeSig,
     };
   }
 
