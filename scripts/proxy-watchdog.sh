@@ -16,9 +16,10 @@ set -uo pipefail
 # Externals are env-overridable (with the production defaults below) purely so
 # the logic can be exercised by test/proxy-watchdog.test.sh with stubbed
 # curl/launchctl/hermes; unset, the behavior is identical to before.
-HERMES_BIN="${HERMES_BIN:-/Users/jarvis/.hermes/hermes-agent/venv/bin/hermes}"
-LOG="${WATCHDOG_LOG:-/Users/jarvis/.hermes/logs/composer-proxy-watchdog.log}"
-STATE="${WATCHDOG_STATE:-/Users/jarvis/.hermes/cache/composer-proxy-watchdog.state}"
+HERMES_HOME="${HERMES_HOME:-/Users/jarvis/hermes/.hermes}"
+HERMES_BIN="${HERMES_BIN:-${HERMES_HOME}/hermes-agent/venv/bin/hermes}"
+LOG="${WATCHDOG_LOG:-${HERMES_HOME}/logs/composer-proxy-watchdog.log}"
+STATE="${WATCHDOG_STATE:-${HERMES_HOME}/cache/composer-proxy-watchdog.state}"
 SERVICE="${WATCHDOG_SERVICE:-com.composer-proxy.server}"
 UID_NUM="$(id -u)"
 PROBE_URL="${WATCHDOG_PROBE_URL:-http://127.0.0.1:8080/v1/chat/completions}"
