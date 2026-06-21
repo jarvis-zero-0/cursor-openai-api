@@ -13,6 +13,7 @@ import {
   type StreamActivity,
 } from "./agent-stream.js";
 import { authHealth } from "./auth-health.js";
+import { beginTurn, endTurn } from "./recycle.js";
 import { CursorMetaAccumulator } from "./cursor-meta.js";
 import {
   isActiveRunError,
@@ -382,12 +383,19 @@ export async function executeAgentTurn(
   );
 
   const runPrepared = async (p: PreparedChatSession) => {
-    const outcome = await sessions.withAgentTurn(p.agentId, () =>
-      runTurnBody(ctx, options, p, resolved, turnStream),
-    );
-    // A completed turn proves auth is healthy; clear any auth-wedge streak.
-    authHealth.recordSuccess();
-    return outcome;
+    // Count this turn so the proactive recycle waits for it to drain before
+    // restarting (it must never cut off a live streaming request).
+    beginTurn();
+    try {
+      const outcome = await sessions.withAgentTurn(p.agentId, () =>
+        runTurnBody(ctx, options, p, resolved, turnStream),
+      );
+      // A completed turn proves auth is healthy; clear any auth-wedge streak.
+      authHealth.recordSuccess();
+      return outcome;
+    } finally {
+      endTurn();
+    }
   };
 
   try {
