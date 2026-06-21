@@ -121,13 +121,16 @@ function readRequestString(
  * a single coupled switch that gates BOTH `.cursor/rules` + AGENTS.md AND the
  * project `.cursor/mcp.json` servers (see `includeProjectMcp` in the SDK), so
  * we deliberately leave it off: delegated native leaves must NOT pull in the
- * heavy generated contract mdc. This does NOT remove a delegate's MCP/tool
- * access — Hermes delivers delegate toolsets (platform_toolsets + inherited MCP
- * toolsets) through the OpenAI `tools` channel, which the client-tool bridge
- * exposes as the in-process `custom-user-tools` MCP server, entirely
- * independent of `settingSources`. The direct Cursor IDE agent is a separate
- * entry point (not this proxy) and still loads `.cursor/rules` + `.cursor/mcp.json`
- * natively; it is unaffected by this scope.
+ * heavy generated contract mdc or project hermes-tools MCP. Contract + skill
+ * index reach native leaves via worker-context.ts first-send injection instead.
+ *
+ * Hermes tool delivery is entry-point-specific:
+ * - **Orchestrator (client mode):** OpenAI `tools[]` → SDK `customTools` bridge
+ *   (capture-only; Hermes executes handlers) — independent of `settingSources`.
+ * - **Native delegated leaf:** `tool_choice: "none"` — no customTools bridge, no
+ *   Hermes tools on the wire; Cursor built-ins only.
+ * - **Plain Cursor IDE (not this proxy):** loads `hermes-tools` MCP from
+ *   `.cursor/mcp.json` natively; unaffected by this scope.
  *
  * A native worker leaf still runs at its own repo cwd (an allowlisted
  * `cursor_cwd`) so file/terminal tools operate in the right tree; an

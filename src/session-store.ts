@@ -36,8 +36,8 @@ export interface PreparedChatSession {
 /**
  * Stable signature of the local-agent scope (cwd + settingSources) so cached
  * agents are partitioned by scope. Derived from the `Agent.create` options the
- * turn will use, so the orchestrator (`settingSources: []`) and a native worker
- * leaf (`settingSources: ["project"]` at its repo cwd) never share an agent.
+ * turn will use, so the orchestrator and a native worker leaf (both use
+ * `settingSources: []`, but differ in cwd) never share an agent.
  */
 function agentScopeSignature(
   opts?: Parameters<typeof Agent.create>[0],

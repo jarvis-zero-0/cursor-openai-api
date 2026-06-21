@@ -23,6 +23,24 @@ const CONTRACT = [
   "",
 ].join("\n");
 
+// Worker variant (audience-aware): no skill_view imperative, Read SKILL.md paths
+// + `hermes -z` brain-op escape hatch.
+const WORKER_CONTRACT = [
+  "# Hermes contract (worker variant)",
+  "",
+  "## Skills first — check before you act (not optional)",
+  "",
+  "Load any skill by READING its `SKILL.md` path directly with the Read tool.",
+  "For brain ops use the `hermes -z \"<instruction>\"` CLI one-shot.",
+  "",
+].join("\n");
+
+const WORKER_CONTRACT_REL = path.join(
+  ".cursor",
+  "rules",
+  "hermes-contract.worker.generated.md",
+);
+
 const INDEX = JSON.stringify({
   version: 1,
   generated_by: "test",
@@ -43,7 +61,7 @@ const INDEX = JSON.stringify({
 let root: string;
 const prevRoot = process.env.HERMES_ROOT;
 
-function writeFixture(): string {
+function writeFixture(opts: { worker?: boolean } = {}): string {
   const dir = mkdtempSync(path.join(tmpdir(), "hermes-wc-"));
   mkdirSync(path.join(dir, ".cursor", "rules"), { recursive: true });
   mkdirSync(path.join(dir, ".cursor", "skills"), { recursive: true });
@@ -51,6 +69,9 @@ function writeFixture(): string {
     path.join(dir, ".cursor", "rules", "hermes-contract.generated.mdc"),
     CONTRACT,
   );
+  if (opts.worker) {
+    writeFileSync(path.join(dir, WORKER_CONTRACT_REL), WORKER_CONTRACT);
+  }
   writeFileSync(
     path.join(dir, ".cursor", "skills", ".hermes-skill-index.json"),
     INDEX,
@@ -83,7 +104,9 @@ describe("loadWorkerPreamble", () => {
     expect(preamble!).toContain("Hermes contract (inlined canonical directives)");
     expect(preamble!).toContain("Be plain and concise.");
     expect(preamble!).toContain("jarvis-orchestrator-routing");
-    expect(preamble!).toContain('skill_view(name="jarvis-diary")');
+    // Workers have no hermes-tools MCP — preamble uses Read-tool paths, not skill_view.
+    expect(preamble!).toContain("jarvis-diary");
+    expect(preamble!).not.toContain('skill_view(name=');
     // Frontmatter must be stripped (no alwaysApply leakage).
     expect(preamble!).not.toContain("alwaysApply");
   });
@@ -92,6 +115,28 @@ describe("loadWorkerPreamble", () => {
     process.env.HERMES_ROOT = mkdtempSync(path.join(tmpdir(), "empty-"));
     __resetWorkerContextCacheForTests();
     expect(loadWorkerPreamble()).toBeUndefined();
+  });
+
+  test("prefers the worker contract variant when present (no skill_view, has hermes -z)", () => {
+    rmSync(root, { recursive: true, force: true });
+    root = writeFixture({ worker: true });
+    process.env.HERMES_ROOT = root;
+    __resetWorkerContextCacheForTests();
+    const preamble = loadWorkerPreamble();
+    expect(preamble).toBeDefined();
+    // Body comes from the worker variant, not the IDE .mdc.
+    expect(preamble!).toContain("Hermes contract (worker variant)");
+    expect(preamble!).not.toContain("inlined canonical directives");
+    // Worker variant drops the skill_view imperative and offers the CLI path.
+    expect(preamble!).not.toContain("skill_view");
+    expect(preamble!).toContain("hermes -z");
+    // Intro still asserts no hermes-tools MCP.
+    expect(preamble!).toContain("hermes-tools");
+  });
+
+  test("intro preamble names the hermes -z brain-op escape hatch", () => {
+    const preamble = loadWorkerPreamble();
+    expect(preamble!).toContain("hermes -z");
   });
 });
 

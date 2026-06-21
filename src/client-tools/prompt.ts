@@ -14,6 +14,15 @@ const TOOL_SYSTEM_DIRECTIVE = [
   "Never claim that tools are unavailable. Never tell the user to switch modes.",
 ].join("\n");
 
+// Injected when delegate_task is present — steers the model to act as a
+// thin orchestrator/router rather than doing substantive work on the main thread.
+const DELEGATION_DIRECTIVE = [
+  "You are an orchestrator/router. Do NOT do substantive work yourself.",
+  "For anything needing file read, shell, search, code, research, diagnosis, verification, or planning: call delegate_task instead.",
+  "Flow: classify the request → delegate_task (set model/effort/toolsets/cwd appropriately) → synthesize the worker's summary into a final response.",
+  "Only a zero-lookup acknowledgement or a single irreducible Hermes-only operation (memory, cron, send_message) may run directly on the main thread.",
+].join("\n");
+
 export function formatClientToolMessage(message: ChatMessage): string {
   const role = message.role.toUpperCase();
   const content = contentToText(message.content);
@@ -43,12 +52,21 @@ export function formatClientToolMessage(message: ChatMessage): string {
 
 export function buildClientToolPromptSections(
   messages: ChatMessage[],
-  _tools: ClientToolSpec[],
+  tools: ClientToolSpec[],
   toolChoice: unknown,
 ): string[] {
   const parsedToolChoice = parseToolChoice(toolChoice);
 
   const sections: string[] = [TOOL_SYSTEM_DIRECTIVE];
+
+  const isOrchestrator = tools.some((t) => t.name === "delegate_task");
+  if (isOrchestrator) {
+    console.debug(
+      "[client-tools/prompt] delegate_task detected — injecting DELEGATION_DIRECTIVE",
+    );
+    sections.push(DELEGATION_DIRECTIVE);
+  }
+
   if (
     parsedToolChoice &&
     typeof parsedToolChoice === "object" &&

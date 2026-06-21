@@ -31,10 +31,21 @@ import type { ChatCompletionRequest } from "./openai.js";
  * double-injection when a prompt already carries the worker context. */
 export const WORKER_CONTEXT_SENTINEL = "<!-- hermes:worker-context:v1 -->";
 
+// Root marker: the IDE/orchestrator contract is always generated, so we use it
+// to locate the control-plane root.
 const CONTRACT_REL = path.join(
   ".cursor",
   "rules",
   "hermes-contract.generated.mdc",
+);
+// Body source: the audience-aware WORKER variant (no hermes-tools MCP — Read
+// SKILL.md paths + `hermes -z`). Falls back to the IDE contract if absent so an
+// older control plane that predates the worker variant still injects something
+// sane.
+const WORKER_CONTRACT_REL = path.join(
+  ".cursor",
+  "rules",
+  "hermes-contract.worker.generated.md",
 );
 const INDEX_REL = path.join(".cursor", "skills", ".hermes-skill-index.json");
 
@@ -102,8 +113,7 @@ function formatSkillIndex(entries: SkillIndexEntry[]): string {
   return entries
     .map(
       (e) =>
-        `- **${e.name}**: ${e.description} — load via \`hermes-tools\` MCP ` +
-        `\`skill_view(name="${e.name}")\` or read \`${e.source}\`.`,
+        `- **${e.name}**: ${e.description} — read \`${e.source}\` with the Read tool.`,
     )
     .join("\n");
 }
@@ -117,8 +127,12 @@ function buildPreamble(contractBody: string, skillIndex: string): string {
       "not loaded via project settings for delegated workers, so the durable " +
       "contract and skill index below are injected directly. Follow the " +
       "contract. When a task matches a skill, load that skill's canonical body " +
-      "first (via the `hermes-tools` MCP `skill_view`, or by reading the listed " +
-      "`SKILL.md` path) and follow it — do not reinvent the procedure.",
+      "first by reading the listed `SKILL.md` path with the Read tool, then " +
+      "follow it — do not reinvent the procedure. You have no `hermes-tools` " +
+      "MCP: load skills by reading their `SKILL.md` paths, and for Hermes brain " +
+      "ops that need validation (memory, skill_manage) shell out to the " +
+      "`hermes -z \"<instruction>\"` CLI one-shot (see the contract's " +
+      "skill-discovery section).",
     "",
     "## Hermes contract",
     "",
@@ -177,7 +191,12 @@ export function loadWorkerPreamble(): string | undefined {
     return undefined;
   }
 
-  const contractPath = path.join(root, CONTRACT_REL);
+  // Prefer the worker-specific contract variant; fall back to the IDE contract
+  // when an older control plane has not generated the worker file yet.
+  const workerContractPath = path.join(root, WORKER_CONTRACT_REL);
+  const contractPath = existsSync(workerContractPath)
+    ? workerContractPath
+    : path.join(root, CONTRACT_REL);
   const indexPath = path.join(root, INDEX_REL);
 
   let contractMtimeMs = 0;
