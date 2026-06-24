@@ -52,10 +52,10 @@ describe("resolveLocalAgentScope", () => {
     expect(scope).toEqual({ cwd: "/global/cwd", settingSources: [] });
   });
 
-  // settingSources stays `[]` for native leaves too (Option 2): the contract +
-  // skill index reach delegated workers via the injected worker-context preamble
-  // (see worker-context.ts), NOT via the SDK `project` setting source. A native
-  // leaf still gets its allowlisted repo cwd so file/terminal tools land right.
+  // settingSources stays `[]` for native leaves too: the contract + skill index
+  // reach delegated workers via the Hermes-assembled system message in messages[],
+  // NOT via the SDK `project` setting source. A native leaf still gets its
+  // allowlisted repo cwd so file/terminal tools land right.
   test("native + allowlisted cwd → that cwd + [] (no project source)", () => {
     const scope = resolveLocalAgentScope(
       req({ cursor_tool_mode: "native", cursor_cwd: "/allow/repo-a" }),

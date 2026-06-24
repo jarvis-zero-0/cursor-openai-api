@@ -46,7 +46,6 @@ import {
   createStreamState,
   type StreamState,
 } from "./stream.js";
-import { maybeInjectWorkerContext } from "./worker-context.js";
 import {
   type ChatChunkWriter,
   createStreamSink,
@@ -121,8 +120,10 @@ function readRequestString(
  * a single coupled switch that gates BOTH `.cursor/rules` + AGENTS.md AND the
  * project `.cursor/mcp.json` servers (see `includeProjectMcp` in the SDK), so
  * we deliberately leave it off: delegated native leaves must NOT pull in the
- * heavy generated contract mdc or project hermes-tools MCP. Contract + skill
- * index reach native leaves via worker-context.ts first-send injection instead.
+ * heavy generated contract mdc or project hermes-tools MCP. The generated
+ * contract is IDE-only — native leaves receive no contract document via
+ * ``messages[]`` or ``settingSources``; skill delivery is task-scoped pointers
+ * in ``context`` (orchestrator packs, worker Read's SKILL.md).
  *
  * Hermes tool delivery is entry-point-specific:
  * - **Orchestrator (client mode):** OpenAI `tools[]` → SDK `customTools` bridge
@@ -191,14 +192,10 @@ async function runTurnBody(
     prepared.sessionKey,
   );
 
-  // Durable awareness for delegated native workers: prepend the Hermes contract
-  // + skill index to the first send of a freshly created native leaf. Decoupled
-  // from `settingSources` (which stays `[]`); a no-op for the orchestrator and
-  // for reused agents (the preamble already lives in their persisted history).
-  const payload = maybeInjectWorkerContext(
-    buildSendPayload(prepared.deltaMessages, extras, turnStream.clientToolSpecs),
-    request,
-    prepared.isNewAgent,
+  const payload = buildSendPayload(
+    prepared.deltaMessages,
+    extras,
+    turnStream.clientToolSpecs,
   );
 
   // Client-tool bridge: register the request's client tools as in-process SDK
