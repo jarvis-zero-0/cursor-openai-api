@@ -56,4 +56,53 @@ describe("buildClientToolPromptSections — DELEGATION_DIRECTIVE", () => {
     );
     expect(sections.join("\n")).toContain("orchestrator/router");
   });
+
+  test("lists reconciled self-serve tools that are present this turn", () => {
+    const sections = buildClientToolPromptSections(
+      [{ role: "user", content: "Go" }],
+      [
+        { name: "delegate_task" },
+        { name: "memory" },
+        { name: "send_message" },
+        { name: "cronjob" },
+        { name: "clarify" },
+        { name: "web_search" },
+        { name: "skill_view" },
+        { name: "skills_list" },
+        { name: "skill_manage" },
+        { name: "session_search" },
+      ],
+      null,
+    );
+    const joined = sections.join("\n");
+    expect(joined).toContain("self-serve tools directly on the main thread");
+    // Manifest order: skills → session_search → web_search → hermes-only ops.
+    expect(joined).toContain(
+      "skill_view, skills_list, skill_manage, session_search, web_search, memory, cronjob, send_message, clarify.",
+    );
+  });
+
+  test("self-serve line only names tools actually sent (intersection)", () => {
+    const sections = buildClientToolPromptSections(
+      [{ role: "user", content: "Go" }],
+      [{ name: "delegate_task" }, { name: "memory" }, { name: "skill_view" }],
+      null,
+    );
+    const joined = sections.join("\n");
+    expect(joined).toContain("skill_view, memory.");
+    expect(joined).not.toContain("session_search");
+    expect(joined).not.toContain("web_search");
+  });
+
+  test("falls back to the irreducible-op line when no self-serve tools present", () => {
+    const sections = buildClientToolPromptSections(
+      [{ role: "user", content: "Go" }],
+      [{ name: "delegate_task" }],
+      null,
+    );
+    const joined = sections.join("\n");
+    expect(joined).toContain(
+      "Only a zero-lookup acknowledgement or a single irreducible Hermes-only operation",
+    );
+  });
 });
